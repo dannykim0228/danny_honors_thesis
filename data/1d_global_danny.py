@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax import random, grad, jit
 import pandas as pd
 import numpy as np
-from pomp_class import Pomp
+from pypomp import Pomp
 #import multiprocessing as mp
 
 # Data Manipulation
