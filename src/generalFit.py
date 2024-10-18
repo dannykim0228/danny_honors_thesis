@@ -1,4 +1,5 @@
 import datetime
+import pickle
 
 print("Current system time:", datetime.datetime.now())
 
@@ -24,6 +25,6 @@ match RUN_LEVEL:
         print("Running at level 2")
 
 
-DATA = None
+DATA = pickle.load(open('../input/ur_measles.pkl', 'rb'))
 MODEL = None
 
