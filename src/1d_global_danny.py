@@ -7,14 +7,17 @@ import numpy as np
 import datetime
 import pypomp
 import pypomp.fit
+import pypomp.pfilter
 import pypomp.pomp_class
+import pickle
 #import multiprocessing as mp
 
 print("Current system time:", datetime.datetime.now())
 
-ncores = 2
+SAVE_RESULTS_TO = "output/default_output/1d_global_danny_out.pkl"
+ncores = 3
 print(ncores)
-RUN_LEVEL = 1
+RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
@@ -25,13 +28,24 @@ match RUN_LEVEL:
         NREPS_EVAL2 = ncores
         print("Running at level 1")
     case 2:
+        NP_FITR = 100
+        NFITR = 20
+        NREPS_FITR = ncores
+        NP_EVAL = 100
+        NREPS_EVAL = ncores
+        NREPS_EVAL2 = ncores
+        print("Running at level 2")
+    case 3:
         NP_FITR = 1000
         NFITR = 200
         NREPS_FITR = ncores
         NP_EVAL = 5000
         NREPS_EVAL = ncores
         NREPS_EVAL2 = ncores*8
-        print("Running at level 2")
+        print("Running at level 3")
+RW_SD = 0.001
+RW_SD_INIT = 0.01
+COOLING_RATE = 0.5
 
 # Data Manipulation
 sp500_raw = pd.read_csv("data/SPX.csv")
@@ -93,14 +107,30 @@ def dmeasure(y, state, params):
     mu = jnp.exp(params[0])
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
-initial_params = jnp.array([
-    jnp.log(0.01), # mu
-    jnp.log(0.1), # kappa
-    jnp.log(0.05), # theta
-    jnp.log(0.1), # xi
-    jnp.log((1 + 0.5)/(1 - 0.5)), # rho 
-    jnp.log(0.1) # V_0
-])
+def funky_transform(list):
+    """Transform rho to perturbation scale"""
+    out = [np.log((1 + x)/(1 - x)) for x in list]
+    return(out)
+
+sp500_box = pd.DataFrame({
+    "mu": np.log([1e-6, 1e-4]),
+    "kappa": np.log([1e-8, 0.1]),
+    "theta": np.log([0.000075, 0.0002]),
+    "xi": np.log([1e-8, 1e-2]),
+    "rho": funky_transform([1e-8, 1-1e-8]),
+    "V_0": np.log([1e-10, 1e-4])
+})
+
+def runif_design(box, n_draws):
+    """Draws parameters from a given box."""
+    draw_list = []
+    draw_frame = pd.DataFrame()
+    for param in box.columns:
+        draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+
+    return draw_frame
+
+initial_params_df = runif_design(sp500_box, NREPS_FITR)
 
 # Initialize POMP model
 sp500_model = pypomp.pomp_class.Pomp(
@@ -110,21 +140,52 @@ sp500_model = pypomp.pomp_class.Pomp(
     # Observed log returns
     ys = jnp.array(sp500['y'].values),
     # Initial parameters
-    theta = initial_params,
+    theta = jnp.array(initial_params_df.iloc[1]),
     # Covariates(time)
     covars = jnp.insert(sp500['y'].values, 0, 0)
 )
 
-fit_out = pypomp.fit.fit(
-    pomp_object = sp500_model,
-    J = NP_FITR,
-    Jh = 5,
-    M = NREPS_FITR,
-    a = 0.5,
-    itns = 2,
-    sigmas = 0.001,
-    sigmas_init = 1e-20,
-    mode = "IF2"
-)
+# Fit POMP model
+start_time = datetime.datetime.now()
+fit_out = []
+pf_out = []
+for rep in range(NREPS_FITR):
+    fit_out.append(pypomp.fit.fit(
+        pomp_object = sp500_model,
+        theta = jnp.array(initial_params_df.iloc[rep]),
+        J = NP_FITR,
+        M = NFITR,
+        a = COOLING_RATE,
+        sigmas = RW_SD,
+        sigmas_init = RW_SD_INIT,
+        mode = "IF2",
+        thresh_mif = 0
+    ))
 
-np.exp(fit_out[1][0])
+    # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
+    # already saved in the model object, so we need to remake the model object.
+    model_for_pfilter = pypomp.pomp_class.Pomp(
+        rinit = rinit,
+        rproc = rproc,
+        dmeas = dmeasure,
+        # Observed log returns
+        ys = jnp.array(sp500['y'].values),
+        # Initial parameters
+        theta = fit_out[rep][1][-1].mean(axis = 0),
+        # Covariates(time)
+        covars = jnp.insert(sp500['y'].values, 0, 0)
+    )
+    # TODO: pfilter multiple times
+    pf_out.append(pypomp.pfilter.pfilter(
+        pomp_object = model_for_pfilter,
+        J = NP_EVAL,
+        thresh = 0
+    ))
+results_out = {
+    "fit_out": fit_out,
+    "pf_out": pf_out,
+}
+end_time = datetime.datetime.now()
+print(end_time - start_time) # run time
+print(pf_out) # Print LL estimates
+pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
