@@ -10,33 +10,43 @@ import pypomp.fit
 import pypomp.pfilter
 import pypomp.pomp_class
 import pickle
-#import multiprocessing as mp
+import os
 
 print("Current system time:", datetime.datetime.now())
 
-SAVE_RESULTS_TO = "output/default_output/1d_global_danny_out.pkl"
+out_dir = os.environ.get("out_dir")
+if out_dir is None:
+    SAVE_RESULTS_TO = "output/default_output/1d_global_out.pkl"
+else:
+    SAVE_RESULTS_TO = out_dir + "1d_global_out.pkl"
+
+gpus = 1
+print("gpus:", gpus)
 RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
         NFITR = 2
-        NREPS_FITR = 2
+        NREPS_FITR = gpus
         NP_EVAL = 2
-        NREPS_EVAL = 2
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus
         print("Running at level 1")
     case 2:
         NP_FITR = 100
         NFITR = 20
-        NREPS_FITR = 4
+        NREPS_FITR = gpus
         NP_EVAL = 100
-        NREPS_EVAL = 4
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
         NFITR = 200
-        NREPS_FITR = 36
+        NREPS_FITR = gpus
         NP_EVAL = 5000
-        NREPS_EVAL = 36
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus*8
         print("Running at level 3")
 RW_SD = 0.001
 RW_SD_INIT = 0.01
@@ -135,7 +145,7 @@ sp500_model = pypomp.pomp_class.Pomp(
     # Observed log returns
     ys = jnp.array(sp500['y'].values),
     # Initial parameters
-    theta = jnp.array(initial_params_df.iloc[1]),
+    theta = jnp.array(initial_params_df.iloc[0]),
     # Covariates(time)
     covars = jnp.insert(sp500['y'].values, 0, 0)
 )
@@ -163,12 +173,14 @@ for rep in range(NREPS_FITR):
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
+        # Observed log returns
         ys = jnp.array(sp500['y'].values),
-        # Grab final parameter estimate from fit results
+        # Initial parameters
         theta = fit_out[rep][1][-1].mean(axis = 0),
+        # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
-    # TODO: pfilter multiple times AND get a different result each time
+    # TODO: pfilter multiple times
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL):
         pf_out2.append(pypomp.pfilter.pfilter(
@@ -177,7 +189,6 @@ for rep in range(NREPS_FITR):
             thresh = 0
         ))
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
-
 results_out = {
     "fit_out": fit_out,
     "pf_out": pf_out,

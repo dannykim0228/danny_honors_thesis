@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# The name of the job:
+#SBATCH --job-name="pypomp search"
+
+# Send yourself an email when the job:
+# aborts abnormally (fails)
+#SBATCH --mail-type=FAIL
+# ends successfully
+#SBATCH --mail-type=END
+
+# Use this email address:
+#SBATCH --mail-user=aaronabk@umich.edu
+
+# GPU settings
+#SBATCH --partition=gpu
+#SBATCH --gpus=v100:1
+#SBATCH --cpus-per-gpu=1
+
+# Total memory
+#SBATCH --mem=4GB
+
+# The maximum running time of the job in days-hours:mins:sec
+#SBATCH --time=0-0:10:00
+
+# The account which this job should run under:
+#SBATCH --account="ionides0"
+
+# Run the job from the directory where it was launched (default)
+
+# The modules to load:
+module load python/3.12.1
+module list
+
+# The job command(s):
+echo "Running on $SLURM_JOB_NODELIST"
+echo "Running in $(pwd)"
+ 
+## Important variables ##
+# out_dir must end with /
+export out_dir="output/1d_global/search_01/"
+file_to_run="1d_global.py"
+mgf_cp_name="job.sbat" #sbat file to copy into output (likely this one)
+
+### Main commands ###
+mkdir -p $out_dir
+echo "Copying .sbat file to $out_dir"
+cp $mgf_cp_name $out_dir$mgf_cp_name
+#cp R/$file_to_run $out_dir$file_to_run
+source ~/opt/py3.12/bin/activate
+echo "Running $out_dir$file_to_run"
+python $out_dir$file_to_run
+#R CMD BATCH --no-restore --no-save \
+#  $out_dir$file_to_run $out_dir$file_to_run"out"
