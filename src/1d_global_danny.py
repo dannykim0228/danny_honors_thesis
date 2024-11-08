@@ -15,33 +15,28 @@ import pickle
 print("Current system time:", datetime.datetime.now())
 
 SAVE_RESULTS_TO = "output/default_output/1d_global_danny_out.pkl"
-ncores = 3
-print(ncores)
 RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
         NFITR = 2
-        NREPS_FITR = ncores
+        NREPS_FITR = 2
         NP_EVAL = 2
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores
+        NREPS_EVAL = 2
         print("Running at level 1")
     case 2:
         NP_FITR = 100
         NFITR = 20
-        NREPS_FITR = ncores
+        NREPS_FITR = 4
         NP_EVAL = 100
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores
+        NREPS_EVAL = 4
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
         NFITR = 200
-        NREPS_FITR = ncores
+        NREPS_FITR = 36
         NP_EVAL = 5000
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores*8
+        NREPS_EVAL = 36
         print("Running at level 3")
 RW_SD = 0.001
 RW_SD_INIT = 0.01
@@ -168,19 +163,21 @@ for rep in range(NREPS_FITR):
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
-        # Observed log returns
         ys = jnp.array(sp500['y'].values),
-        # Initial parameters
+        # Grab final parameter estimate from fit results
         theta = fit_out[rep][1][-1].mean(axis = 0),
-        # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
-    # TODO: pfilter multiple times
-    pf_out.append(pypomp.pfilter.pfilter(
-        pomp_object = model_for_pfilter,
-        J = NP_EVAL,
-        thresh = 0
-    ))
+    # TODO: pfilter multiple times AND get a different result each time
+    pf_out2 = []
+    for pf_rep in range(NREPS_EVAL):
+        pf_out2.append(pypomp.pfilter.pfilter(
+            pomp_object = model_for_pfilter,
+            J = NP_EVAL,
+            thresh = 0
+        ))
+    pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
+
 results_out = {
     "fit_out": fit_out,
     "pf_out": pf_out,
