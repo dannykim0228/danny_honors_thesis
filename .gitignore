@@ -3,8 +3,10 @@
 
 scratch.py
 scratch.ipynb
-**/.DS_Store
+**.pkl
+**.DS_Store
 output/default_output/*
+*.out
 
 #### the following is the default Python package gitignore from GitHub ####
 

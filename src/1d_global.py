@@ -10,38 +10,43 @@ import pypomp.fit
 import pypomp.pfilter
 import pypomp.pomp_class
 import pickle
-#import multiprocessing as mp
+import os
 
 print("Current system time:", datetime.datetime.now())
 
-SAVE_RESULTS_TO = "output/default_output/1d_global_danny_out.pkl"
-ncores = 3
-print(ncores)
+out_dir = os.environ.get("out_dir")
+if out_dir is None:
+    SAVE_RESULTS_TO = "output/default_output/1d_global_danny_out.pkl"
+else:
+    SAVE_RESULTS_TO = out_dir
+
+gpus = 1
+print(gpus)
 RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
         NFITR = 2
-        NREPS_FITR = ncores
+        NREPS_FITR = gpus
         NP_EVAL = 2
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus
         print("Running at level 1")
     case 2:
         NP_FITR = 100
         NFITR = 20
-        NREPS_FITR = ncores
+        NREPS_FITR = gpus
         NP_EVAL = 100
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
         NFITR = 200
-        NREPS_FITR = ncores
+        NREPS_FITR = gpus
         NP_EVAL = 5000
-        NREPS_EVAL = ncores
-        NREPS_EVAL2 = ncores*8
+        NREPS_EVAL = gpus
+        NREPS_EVAL2 = gpus*8
         print("Running at level 3")
 RW_SD = 0.001
 RW_SD_INIT = 0.01
