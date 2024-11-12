@@ -1,16 +1,16 @@
 """pypomp implementation of Weizhe's 1d_global_search.R code."""
+import os
+import pickle
+import datetime
 import jax
 import jax.numpy as jnp
 from jax import random
 import pandas as pd
 import numpy as np
-import datetime
 import pypomp
 import pypomp.fit
 import pypomp.pfilter
 import pypomp.pomp_class
-import pickle
-import os
 
 print("Current system time:", datetime.datetime.now())
 
@@ -20,33 +20,33 @@ if out_dir is None:
 else:
     SAVE_RESULTS_TO = out_dir + "1d_global_out.pkl"
 
-gpus = 1
-print("gpus:", gpus)
+GPUS = 1
+print("gpus:", GPUS)
 RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
         NFITR = 2
-        NREPS_FITR = gpus
+        NREPS_FITR = GPUS
         NP_EVAL = 2
-        NREPS_EVAL = gpus
-        NREPS_EVAL2 = gpus
+        NREPS_EVAL = GPUS
+        NREPS_EVAL2 = GPUS
         print("Running at level 1")
     case 2:
         NP_FITR = 100
         NFITR = 20
-        NREPS_FITR = gpus
+        NREPS_FITR = GPUS
         NP_EVAL = 100
-        NREPS_EVAL = gpus
-        NREPS_EVAL2 = gpus
+        NREPS_EVAL = GPUS
+        NREPS_EVAL2 = GPUS
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
         NFITR = 200
-        NREPS_FITR = gpus
+        NREPS_FITR = GPUS
         NP_EVAL = 5000
-        NREPS_EVAL = gpus
-        NREPS_EVAL2 = gpus*8
+        NREPS_EVAL = GPUS
+        NREPS_EVAL2 = GPUS*8
         print("Running at level 3")
 RW_SD = 0.001
 RW_SD_INIT = 0.01
@@ -72,52 +72,51 @@ def rproc(state, params, key, covars = None):
     """Process simulator for Weizhe model."""
     V, S, t = state
     mu, kappa, theta, xi, rho, V_0 = params
+    # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     xi = jnp.exp(xi)
     rho = -1 + 2/(1 + jnp.exp(-rho))
+    # Make sure t is cast as an int
     t = t.astype(int)
-    
     # Wiener process generation (Gaussian noise)
     dZ = random.normal(key)
-    
-    # Calculate dWs
     dWs = (covars[t] - mu + 0.5 * V) / jnp.sqrt(V)
-
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
-    
-    # Update state variables
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
-    #S = S + S * (mu + jnp.sqrt(V) * dWs)
     V = V + xi * jnp.sqrt(V) * dWv
     t += 1
-    
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
-    
+    # Results must be returned as a JAX array
     return jnp.array([V, S, t])
 
 # Initialization Model
 def rinit(params, J, covars = None):
     """Initial state process simulator for Weizhe model."""
+    # Transform V_0 onto natural scale
     V_0 = jnp.exp(params[5])
     S_0 = 1105  # Initial price
     t = 0
+    # Result must be returned as a JAX array. For rinit, the states must be replicated
+    # for each particle. 
     return jnp.tile(jnp.array([V_0, S_0, t]), (J,1))
 
 # Measurement model: how we measure state
 def dmeasure(y, state, params):
     """Measurement model distribution for Weizhe model."""
     V, S, t = state
+    # Transform mu onto the natural scale
     mu = jnp.exp(params[0])
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
-def funky_transform(list):
+def funky_transform(lst):
     """Transform rho to perturbation scale"""
-    out = [np.log((1 + x)/(1 - x)) for x in list]
-    return(out)
+    out = [np.log((1 + x)/(1 - x)) for x in lst]
+    return out
 
 sp500_box = pd.DataFrame({
+    # Parameters are transformed onto the perturbation scale
     "mu": np.log([1e-6, 1e-4]),
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
@@ -128,11 +127,9 @@ sp500_box = pd.DataFrame({
 
 def runif_design(box, n_draws):
     """Draws parameters from a given box."""
-    draw_list = []
     draw_frame = pd.DataFrame()
     for param in box.columns:
         draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
-
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
@@ -180,7 +177,7 @@ for rep in range(NREPS_FITR):
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
-    # TODO: pfilter multiple times
+    # TODO: Make sure multiple pfilters use different seeds
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL):
         pf_out2.append(pypomp.pfilter.pfilter(
