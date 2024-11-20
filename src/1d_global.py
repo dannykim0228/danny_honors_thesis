@@ -20,6 +20,10 @@ if out_dir is None:
 else:
     SAVE_RESULTS_TO = out_dir + "1d_global_out.pkl"
 
+#SJNN = os.environ.get("SLURM_JOB_NUM_NODES")
+#SGON = os.environ.get("SLURM_GPUS_ON_NODE")
+MAIN_SEED = 631409
+np.random.seed(MAIN_SEED)
 GPUS = 1
 print("gpus:", GPUS)
 RUN_LEVEL = 2
@@ -27,18 +31,18 @@ match RUN_LEVEL:
     case 1:
         NP_FITR = 2
         NFITR = 2
-        NREPS_FITR = GPUS
+        NREPS_FITR = 3
         NP_EVAL = 2
-        NREPS_EVAL = GPUS
-        NREPS_EVAL2 = GPUS
+        NREPS_EVAL = 5
+        NREPS_EVAL2 = 5
         print("Running at level 1")
     case 2:
         NP_FITR = 100
         NFITR = 20
-        NREPS_FITR = GPUS
+        NREPS_FITR = 3
         NP_EVAL = 100
-        NREPS_EVAL = GPUS
-        NREPS_EVAL2 = GPUS
+        NREPS_EVAL = 5
+        NREPS_EVAL2 = 5
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
@@ -149,6 +153,7 @@ sp500_model = pypomp.pomp_class.Pomp(
 
 # Fit POMP model
 start_time = datetime.datetime.now()
+key = random.key(MAIN_SEED)
 fit_out = []
 pf_out = []
 for rep in range(NREPS_FITR):
@@ -179,11 +184,14 @@ for rep in range(NREPS_FITR):
     )
     # TODO: Make sure multiple pfilters use different seeds
     pf_out2 = []
-    for pf_rep in range(NREPS_EVAL):
+    for pf_rep in range(NREPS_EVAL): #split R.N.G
+        # JAX seed needs to be changed manually
+        key, subkey = random.split(key = key)
         pf_out2.append(pypomp.pfilter.pfilter(
             pomp_object = model_for_pfilter,
             J = NP_EVAL,
-            thresh = 0
+            thresh = 0,
+            key = subkey
         ))
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 results_out = {
