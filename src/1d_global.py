@@ -54,7 +54,7 @@ match RUN_LEVEL:
         print("Running at level 3")
 RW_SD = 0.001
 RW_SD_INIT = 0.01
-COOLING_RATE = 0.5
+COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R. 
 
 # Data Manipulation
 sp500_raw = pd.read_csv("data/SPX.csv")
