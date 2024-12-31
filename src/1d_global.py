@@ -29,12 +29,12 @@ print("gpus:", GPUS)
 RUN_LEVEL = 2
 match RUN_LEVEL:
     case 1:
-        NP_FITR = 2
-        NFITR = 2
-        NREPS_FITR = 3
+        NP_FITR = 2 # Number of particles for filtering
+        NFITR = 2 # Number of iterated filtering steps
+        NREPS_FITR = 3 # Replicates for each step
         NP_EVAL = 2
-        NREPS_EVAL = 5
-        NREPS_EVAL2 = 5
+        NREPS_EVAL = 5 # Replicates for each step
+        NREPS_EVAL2 = 5 # Replicates for each step
         print("Running at level 1")
     case 2:
         NP_FITR = 100
@@ -52,9 +52,10 @@ match RUN_LEVEL:
         NREPS_EVAL = GPUS
         NREPS_EVAL2 = GPUS*8
         print("Running at level 3")
-RW_SD = 0.001
+RW_SD = 0.001 # SD for random walk parameter perturbations
 RW_SD_INIT = 0.01
-COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R. 
+COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
+# Cooling fraction for controlling parameter perturbations
 
 # Data Manipulation
 sp500_raw = pd.read_csv("data/SPX.csv")
@@ -72,6 +73,8 @@ sp500_ivp_names = ["V_0"]
 sp500_parameters = sp500_rp_names + sp500_ivp_names
 sp500_covarnames = ["covaryt"]
 
+
+# ----------------------------------------------------------------
 def rproc(state, params, key, covars = None):
     """Process simulator for Weizhe model."""
     V, S, t = state
@@ -79,7 +82,7 @@ def rproc(state, params, key, covars = None):
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     xi = jnp.exp(xi)
-    rho = -1 + 2/(1 + jnp.exp(-rho))
+    rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Make sure t is cast as an int
     t = t.astype(int)
     # Wiener process generation (Gaussian noise)
@@ -94,6 +97,9 @@ def rproc(state, params, key, covars = None):
     V = jnp.maximum(V, 1e-32)
     # Results must be returned as a JAX array
     return jnp.array([V, S, t])
+# Potential Issue: Ensure indexing for covars[t] in Python aligns with R's covaryt
+# ----------------------------------------------------------------
+
 
 # Initialization Model
 def rinit(params, J, covars = None):
@@ -103,9 +109,11 @@ def rinit(params, J, covars = None):
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
-    # for each particle. 
-    return jnp.tile(jnp.array([V_0, S_0, t]), (J,1))
+    # for each particle
+    return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
 
+
+# ----------------------------------------------------------------
 # Measurement model: how we measure state
 def dmeasure(y, state, params):
     """Measurement model distribution for Weizhe model."""
@@ -113,19 +121,23 @@ def dmeasure(y, state, params):
     # Transform mu onto the natural scale
     mu = jnp.exp(params[0])
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
+# Potential Issue: Ensure T of mu aligns with R’s scale
+# ----------------------------------------------------------------
+
 
 def funky_transform(lst):
     """Transform rho to perturbation scale"""
-    out = [np.log((1 + x)/(1 - x)) for x in lst]
+    out = [np.log((1 + x) / (1 - x)) for x in lst]
     return out
 
+# ----------------------------------------------------------------
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
     "mu": np.log([1e-6, 1e-4]),
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
     "xi": np.log([1e-8, 1e-2]),
-    "rho": funky_transform([1e-8, 1-1e-8]),
+    "rho": funky_transform([1e-8, 1 - 1e-8]),
     "V_0": np.log([1e-10, 1e-4])
 })
 
@@ -137,6 +149,9 @@ def runif_design(box, n_draws):
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
+ # Potential Issue: Ensure ranges of transformed parameters match ranges in R after applying inv T
+# ----------------------------------------------------------------
+
 
 # Initialize POMP model
 sp500_model = pypomp.pomp_class.Pomp(
@@ -168,6 +183,7 @@ for rep in range(NREPS_FITR):
         mode = "IF2",
         thresh_mif = 0
     ))
+    # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
 
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
     # already saved in the model object, so we need to remake the model object.
@@ -193,6 +209,8 @@ for rep in range(NREPS_FITR):
             thresh = 0,
             key = subkey
         ))
+        # Potential Issue: Ensure key argument in Python’s random.split ensures independent random streams for each replicate
+        # Potential Issue: Confirm R’s registerDoRNG matches Python’s seed handling for reproducibility
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 results_out = {
     "fit_out": fit_out,
