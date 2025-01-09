@@ -37,10 +37,12 @@ match RUN_LEVEL:
         NREPS_EVAL2 = 5 # Replicates for each step
         print("Running at level 1")
     case 2:
-        NP_FITR = 100
+        #NP_FITR = 100
+        NP_FITR = 1000
         NFITR = 20
         NREPS_FITR = 3
-        NP_EVAL = 100
+        #NP_EVAL = 100
+        NP_EVAL = 1000
         NREPS_EVAL = 5
         NREPS_EVAL2 = 5
         print("Running at level 2")
@@ -54,8 +56,9 @@ match RUN_LEVEL:
         print("Running at level 3")
 RW_SD = 0.001 # SD for random walk parameter perturbations
 RW_SD_INIT = 0.01
-COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
+# COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
 # Cooling fraction for controlling parameter perturbations
+COOLING_RATE = 0.987
 
 # Data Manipulation
 sp500_raw = pd.read_csv("data/SPX.csv")
@@ -64,7 +67,7 @@ sp500['date'] = pd.to_datetime(sp500['Date'])
 sp500['diff_days'] = (sp500['date'] - sp500['date'].min()).dt.days
 sp500['time'] = sp500['diff_days'].astype(float)
 sp500['y'] = np.log(sp500['Close'] / sp500['Close'].shift(1))
-sp500 = sp500.dropna(subset=['y'])[['time', 'y']]
+sp500 = sp500.dropna(subset = ['y'])[['time', 'y']]
 
 # Name of States and Parmeters
 sp500_statenames = ["V", "S"]
@@ -152,29 +155,29 @@ initial_params_df = runif_design(sp500_box, NREPS_FITR)
  # Potential Issue: Ensure ranges of transformed parameters match ranges in R after applying inv T
 # ----------------------------------------------------------------
 
-
-# Initialize POMP model
-sp500_model = pypomp.pomp_class.Pomp(
-    rinit = rinit,
-    rproc = rproc,
-    dmeas = dmeasure,
-    # Observed log returns
-    ys = jnp.array(sp500['y'].values),
-    # Initial parameters
-    theta = jnp.array(initial_params_df.iloc[0]),
-    # Covariates(time)
-    covars = jnp.insert(sp500['y'].values, 0, 0)
-)
-
-# Fit POMP model
+# Fit POMP model using IF
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
 fit_out = []
 pf_out = []
 for rep in range(NREPS_FITR):
+    # Apparently the theta argument for pypomp.fit doesn't override whatever is
+    # already saved in the model object, so we need to remake the model object each rep.
+    # Initialize POMP model
+    sp500_model = pypomp.pomp_class.Pomp(
+        rinit = rinit,
+        rproc = rproc,
+        dmeas = dmeasure,
+        # Observed log returns
+        ys = jnp.array(sp500['y'].values),
+        # Initial parameters
+        theta = jnp.array(initial_params_df.iloc[0]),
+        # Covariates(time)
+        covars = jnp.insert(sp500['y'].values, 0, 0)
+)      
     fit_out.append(pypomp.fit.fit(
         pomp_object = sp500_model,
-        theta = jnp.array(initial_params_df.iloc[rep]),
+        # theta = jnp.array(initial_params_df.iloc[rep]),
         J = NP_FITR,
         M = NFITR,
         a = COOLING_RATE,
@@ -183,10 +186,12 @@ for rep in range(NREPS_FITR):
         mode = "IF2",
         thresh_mif = 0
     ))
+
     # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
 
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
-    # already saved in the model object, so we need to remake the model object.
+    # already saved in the model object, so we need to remake the model object
+    # Evaluate model using PF
     model_for_pfilter = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -212,6 +217,7 @@ for rep in range(NREPS_FITR):
         # Potential Issue: Ensure key argument in Python’s random.split ensures independent random streams for each replicate
         # Potential Issue: Confirm R’s registerDoRNG matches Python’s seed handling for reproducibility
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
+
 results_out = {
     "fit_out": fit_out,
     "pf_out": pf_out,
