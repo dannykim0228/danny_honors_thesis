@@ -10,7 +10,7 @@ import pypomp
 import pypomp.fit
 import pypomp.pfilter
 import pypomp.pomp_class
-import global_1d.py as g
+import global_1d as g
 
 # Check 1: Testing rinit
 params = jnp.array([jnp.log(0.0001), jnp.log(0.01), jnp.log(0.00015), jnp.log(0.001), 0.0, jnp.log(1e-6)])
