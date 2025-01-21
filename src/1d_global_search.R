@@ -45,8 +45,8 @@ rproc1 <- "
   S += S * (mu + sqrt(fmax(V, 0.0)) * dWs);
   
   // S & V are updated based on this process, ensuring V stays positive
-  if (V <= 0) {
-    V = 1e - 32;
+  if (V<=0) {
+    V=1e-32;
   } 
 "
 
@@ -210,6 +210,7 @@ mle_params <- c(
   rho = -7.29e-1
 )
 
+"""
 pfilter_results <- pfilter(
   sp500.filt,
   params = mle_params,
@@ -219,3 +220,24 @@ pfilter_results <- pfilter(
 log_likelihood <- logLik(pfilter_results)
 print(log_likelihood)
 print(pfilter_results)
+"""
+
+
+num_reps <- 10
+
+log_likelihoods <- replicate(num_reps, {
+  pfilter_result <- pfilter(
+    sp500.filt,
+    params = mle_params,
+    Np = sp500_Np
+  )
+  logLik(pfilter_result)
+})
+
+
+mean_ll <- mean(log_likelihoods)
+sd_ll <- sd(log_likelihoods)
+cat("LL summary:\n")
+cat("Mean:", mean_ll, "\n")
+cat("SD:", sd_ll, "\n")
+cat("All LL:", log_likelihoods, "\n")
