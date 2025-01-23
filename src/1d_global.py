@@ -56,6 +56,8 @@ match RUN_LEVEL:
         print("Running at level 3")
 RW_SD = 0.001 # SD for random walk parameter perturbations
 RW_SD_INIT = 0.01
+#RW_SD = 0.0003-Aaron Check
+#RW_SD_INIT = 0.004-Aaron Check
 # COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
 # Cooling fraction for controlling parameter perturbations
 COOLING_RATE = 0.987
@@ -81,9 +83,11 @@ sp500_covarnames = ["covaryt"]
 def rproc(state, params, key, covars = None):
     """Process simulator for Weizhe model."""
     V, S, t = state
-    mu, kappa, theta, xi, rho, V_0 = params
+    #Removed mu
+    kappa, theta, xi, rho, V_0 = params
     # Transform parameters onto natural scale
-    mu = jnp.exp(mu)
+    #mu = jnp.exp(mu)
+    mu = 3.71e-4
     xi = jnp.exp(xi)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Make sure t is cast as an int
@@ -94,7 +98,8 @@ def rproc(state, params, key, covars = None):
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
-    V = V + xi * jnp.sqrt(V) * dWv
+    V = V + kappa * (theta - V) + xi * jnp.sqrt(V) * dWv
+    #V = V + kappa * (theta - V) + xi * jnp.sqrt(jnp.maximum(V, 0.0)) * dWv
     t += 1
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
@@ -122,7 +127,8 @@ def dmeasure(y, state, params):
     """Measurement model distribution for Weizhe model."""
     V, S, t = state
     # Transform mu onto the natural scale
-    mu = jnp.exp(params[0])
+    #mu = jnp.exp(params[0])
+    mu = 3.71e-4
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 # Potential Issue: Ensure T of mu aligns with R’s scale
 # ----------------------------------------------------------------
@@ -139,9 +145,12 @@ sp500_box = pd.DataFrame({
     "mu": np.log([1e-6, 1e-4]),
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
-    "xi": np.log([1e-8, 1e-2]),
-    "rho": funky_transform([1e-8, 1 - 1e-8]),
-    "V_0": np.log([1e-10, 1e-4])
+    #"xi": np.log([1e-8, 1e-2]),-Aaron Check
+    #"rho": funky_transform([1e-8, 1 - 1e-8]),
+    #"V_0": np.log([1e-10, 1e-4])
+    "xi": np.log([5e-4, 1e-2]),
+    "rho": funky_transform([0.5, 0.9]),
+    "V_0": np.log([1e-6, 1e-4])
 })
 
 def runif_design(box, n_draws):
@@ -171,10 +180,11 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        theta = jnp.array(initial_params_df.iloc[0]),
+        #theta = jnp.array(initial_params_df.iloc[0]),-Aaron Check
+        theta = jnp.array(initial_params_df.iloc[rep]),
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
-)      
+    )      
     fit_out.append(pypomp.fit.fit(
         pomp_object = sp500_model,
         # theta = jnp.array(initial_params_df.iloc[rep]),
