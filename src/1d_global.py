@@ -1,4 +1,3 @@
-"""pypomp implementation of Weizhe's 1d_global_search.R code."""
 import os
 import pickle
 import datetime
@@ -83,8 +82,7 @@ sp500_covarnames = ["covaryt"]
 def rproc(state, params, key, covars = None):
     """Process simulator for Weizhe model."""
     V, S, t = state
-    #Removed mu
-    kappa, theta, xi, rho, V_0 = params
+    kappa, theta, xi, rho, V_0 = params # Removed mu
     # Transform parameters onto natural scale
     #mu = jnp.exp(mu)
     mu = 3.71e-4
@@ -113,7 +111,7 @@ def rproc(state, params, key, covars = None):
 def rinit(params, J, covars = None):
     """Initial state process simulator for Weizhe model."""
     # Transform V_0 onto natural scale
-    V_0 = jnp.exp(params[5])
+    V_0 = jnp.exp(params[5]) #Need to Check with Aaron
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
@@ -142,7 +140,7 @@ def funky_transform(lst):
 # ----------------------------------------------------------------
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
-    "mu": np.log([1e-6, 1e-4]),
+    #"mu": np.log([1e-6, 1e-4]), -Aaron Check
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
     #"xi": np.log([1e-8, 1e-2]),-Aaron Check
