@@ -25,7 +25,7 @@ MAIN_SEED = 631409
 np.random.seed(MAIN_SEED)
 GPUS = 1
 print("gpus:", GPUS)
-RUN_LEVEL = 2
+RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2 # Number of particles for filtering
@@ -156,6 +156,22 @@ def runif_design(box, n_draws):
     draw_frame = pd.DataFrame()
     for param in box.columns:
         draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+
+    # Apply Feller to constrain xi
+    # Transform kappa, theta to natural scale
+    draw_frame["kappa"] = np.exp(draw_frame["kappa"])
+    draw_frame["theta"] = np.exp(draw_frame["theta"])
+
+    # Compute upbound for xi based on Feller
+    xi_upper_bound = np.sqrt(2 * draw_frame["kappa"] * draw_frame["theta"])
+    
+    # Draw xi uniformly
+    draw_frame["xi"] = np.random.uniform(0, xi_upper_bound)
+
+    # transform kappa, theta, xi back to log 
+    draw_frame["kappa"] = np.log(draw_frame["kappa"])
+    draw_frame["theta"] = np.log(draw_frame["theta"])
+    draw_frame["xi"] = np.log(draw_frame["xi"])
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
