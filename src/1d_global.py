@@ -119,12 +119,12 @@ def funky_transform(lst):
 
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
-    "mu": np.log([1e-6, 1e-4]),
-    "kappa": np.log([1e-8, 0.1]),
-    "theta": np.log([0.000075, 0.0002]),
-    "xi": np.log([1e-8, 1e-2]),
-    "rho": funky_transform([-0.9, 0.9]),
-    "V_0": np.log([1e-6, 1e-4])
+    "mu": [1e-6, 1e-4],
+    "kappa": [1e-8, 0.1],
+    "theta": [0.000075, 0.0002],
+    "xi": [1e-8, 1e-2],
+    "rho": [-0.9, 0.9],
+    "V_0": [1e-6, 1e-4]
 })
 
 def runif_design(box, n_draws):
