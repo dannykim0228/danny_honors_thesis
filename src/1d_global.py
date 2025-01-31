@@ -24,9 +24,8 @@ else:
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
 MAIN_SEED = 631409
 np.random.seed(MAIN_SEED)
-GPUS = 1
-print("gpus:", GPUS)
-RUN_LEVEL = 2
+
+RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
@@ -34,7 +33,6 @@ match RUN_LEVEL:
         NREPS_FITR = 3
         NP_EVAL = 2
         NREPS_EVAL = 5
-        NREPS_EVAL2 = 5
         print("Running at level 1")
     case 2:
         NP_FITR = 1000
@@ -42,18 +40,16 @@ match RUN_LEVEL:
         NREPS_FITR = 3
         NP_EVAL = 1000
         NREPS_EVAL = 5
-        NREPS_EVAL2 = 5
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
-        NFITR = 200
-        NREPS_FITR = GPUS
+        NFITR = 100
+        NREPS_FITR = 20
         NP_EVAL = 5000
-        NREPS_EVAL = GPUS
-        NREPS_EVAL2 = GPUS*8
+        NREPS_EVAL = 20
         print("Running at level 3")
-RW_SD = 0.001
-RW_SD_INIT = 0.01
+RW_SD = 0.02
+RW_SD_INIT = 0.1
 COOLING_RATE = 0.987
 
 # Data Manipulation
@@ -78,6 +74,8 @@ def rproc(state, params, key, covars = None):
     mu, kappa, theta, xi, rho, V_0 = params
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
+    kappa = jnp.exp(kappa)
+    theta = jnp.exp(theta)
     xi = jnp.exp(xi)
     rho = -1 + 2/(1 + jnp.exp(-rho))
     # Make sure t is cast as an int
@@ -87,8 +85,8 @@ def rproc(state, params, key, covars = None):
     dWs = (covars[t] - mu + 0.5 * V) / jnp.sqrt(V)
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
-    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
-    V = V + xi * jnp.sqrt(V) * dWv
+    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
+    V = V + kappa*(theta - V) + xi * jnp.sqrt(V) * dWv
     t += 1
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
@@ -125,8 +123,8 @@ sp500_box = pd.DataFrame({
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
     "xi": np.log([1e-8, 1e-2]),
-    "rho": funky_transform([1e-8, 1-1e-8]),
-    "V_0": np.log([1e-10, 1e-4])
+    "rho": funky_transform([-0.9, 0.9]),
+    "V_0": np.log([1e-6, 1e-4])
 })
 
 def runif_design(box, n_draws):
@@ -134,6 +132,12 @@ def runif_design(box, n_draws):
     draw_frame = pd.DataFrame()
     for param in box.columns:
         draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+    draw_frame["mu"] = np.log(draw_frame["mu"])
+    draw_frame["kappa"] = np.log(draw_frame["kappa"])
+    draw_frame["theta"] = np.log(draw_frame["theta"])
+    draw_frame["xi"] = np.log(draw_frame["xi"])
+    draw_frame["rho"] = funky_transform(draw_frame["rho"])
+    draw_frame["V_0"] = np.log(draw_frame["V_0"])
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
