@@ -1,4 +1,3 @@
-"""pypomp implementation of Weizhe's 1d_global_search.R code."""
 import os
 import pickle
 import datetime
@@ -24,9 +23,7 @@ else:
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
 MAIN_SEED = 631409
 np.random.seed(MAIN_SEED)
-GPUS = 1
-print("gpus:", GPUS)
-RUN_LEVEL = 2
+RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2 # Number of particles for filtering
@@ -34,34 +31,27 @@ match RUN_LEVEL:
         NREPS_FITR = 3 # Replicates for each step
         NP_EVAL = 2
         NREPS_EVAL = 5 # Replicates for each step
-        NREPS_EVAL2 = 5 # Replicates for each step
         print("Running at level 1")
     case 2:
-        #NP_FITR = 100
         NP_FITR = 1000
         NFITR = 20
         NREPS_FITR = 3
-        #NP_EVAL = 100
         NP_EVAL = 1000
         NREPS_EVAL = 5
-        NREPS_EVAL2 = 5
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
-        NFITR = 200
-        NREPS_FITR = GPUS
+        NFITR = 100
+        NREPS_FITR = 20
         NP_EVAL = 5000
-        NREPS_EVAL = GPUS
-        NREPS_EVAL2 = GPUS*8
+        NREPS_EVAL = 20
         print("Running at level 3")
-RW_SD = 0.001 # SD for random walk parameter perturbations
-RW_SD_INIT = 0.01
-# COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
-# Cooling fraction for controlling parameter perturbations
+RW_SD = 0.0003
+RW_SD_INIT = 0.004
 COOLING_RATE = 0.987
 
 # Data Manipulation
-sp500_raw = pd.read_csv("data/SPX.csv")
+sp500_raw = pd.read_csv("C:/Users/ravis/OneDrive/Documents/danny_honors_thesis/data/SPX.csv")
 sp500 = sp500_raw.copy()
 sp500['date'] = pd.to_datetime(sp500['Date'])
 sp500['diff_days'] = (sp500['date'] - sp500['date'].min()).dt.days
@@ -79,12 +69,13 @@ sp500_covarnames = ["covaryt"]
 
 # ----------------------------------------------------------------
 def rproc(state, params, key, covars = None):
-    """Process simulator for Weizhe model."""
     V, S, t = state
     mu, kappa, theta, xi, rho, V_0 = params
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     xi = jnp.exp(xi)
+    kappa = jnp.exp(kappa)
+    theta = jnp.exp(theta)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Make sure t is cast as an int
     t = t.astype(int)
@@ -94,19 +85,16 @@ def rproc(state, params, key, covars = None):
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
-    V = V + xi * jnp.sqrt(V) * dWv
+    V = V + kappa * (theta - V) + xi * jnp.sqrt(jnp.maximum(V, 0.0)) * dWv
     t += 1
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
     # Results must be returned as a JAX array
     return jnp.array([V, S, t])
-# Potential Issue: Ensure indexing for covars[t] in Python aligns with R's covaryt
-# ----------------------------------------------------------------
 
 
 # Initialization Model
 def rinit(params, J, covars = None):
-    """Initial state process simulator for Weizhe model."""
     # Transform V_0 onto natural scale
     V_0 = jnp.exp(params[5])
     S_0 = 1105  # Initial price
@@ -116,16 +104,12 @@ def rinit(params, J, covars = None):
     return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
 
 
-# ----------------------------------------------------------------
 # Measurement model: how we measure state
 def dmeasure(y, state, params):
-    """Measurement model distribution for Weizhe model."""
     V, S, t = state
     # Transform mu onto the natural scale
     mu = jnp.exp(params[0])
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
-# Potential Issue: Ensure T of mu aligns with R’s scale
-# ----------------------------------------------------------------
 
 
 def funky_transform(lst):
@@ -139,9 +123,9 @@ sp500_box = pd.DataFrame({
     "mu": np.log([1e-6, 1e-4]),
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
-    "xi": np.log([1e-8, 1e-2]),
-    "rho": funky_transform([1e-8, 1 - 1e-8]),
-    "V_0": np.log([1e-10, 1e-4])
+    "xi": np.log([5e-4, 1e-2]),
+    "rho": funky_transform([0.5, 0.9]),
+    "V_0": np.log([1e-6, 1e-4])
 })
 
 def runif_design(box, n_draws):
@@ -152,8 +136,8 @@ def runif_design(box, n_draws):
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
- # Potential Issue: Ensure ranges of transformed parameters match ranges in R after applying inv T
-# ----------------------------------------------------------------
+print("Checking initial_params_df values (first 5 rows):") # Checking parameters are in perturbation scale
+print(initial_params_df.head()) # For Debugging
 
 # Fit POMP model using IF
 start_time = datetime.datetime.now()
@@ -164,6 +148,10 @@ for rep in range(NREPS_FITR):
     # Apparently the theta argument for pypomp.fit doesn't override whatever is
     # already saved in the model object, so we need to remake the model object each rep.
     # Initialize POMP model
+    theta_check = jnp.array(initial_params_df.iloc[rep])
+    print(f"Checking theta values before running POMP model for rep {rep}:")
+    print("e-transformed positive parameters:", jnp.exp(theta_check[:4]))  # > 0
+    print("Transformed rho:", -1 + 2 / (1 + jnp.exp(-theta_check[4])))  # (-1,1)
     sp500_model = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -171,10 +159,11 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        theta = jnp.array(initial_params_df.iloc[0]),
+        #theta = jnp.array(initial_params_df.iloc[0]),-Aaron Check
+        theta = theta_check,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
-)      
+    )      
     fit_out.append(pypomp.fit.fit(
         pomp_object = sp500_model,
         # theta = jnp.array(initial_params_df.iloc[rep]),
@@ -186,8 +175,6 @@ for rep in range(NREPS_FITR):
         mode = "IF2",
         thresh_mif = 0
     ))
-
-    # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
 
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
     # already saved in the model object, so we need to remake the model object
@@ -214,8 +201,6 @@ for rep in range(NREPS_FITR):
             thresh = 0,
             key = subkey
         ))
-        # Potential Issue: Ensure key argument in Python’s random.split ensures independent random streams for each replicate
-        # Potential Issue: Confirm R’s registerDoRNG matches Python’s seed handling for reproducibility
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 
 results_out = {
