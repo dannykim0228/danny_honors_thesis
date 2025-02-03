@@ -46,8 +46,8 @@ match RUN_LEVEL:
         NP_EVAL = 5000
         NREPS_EVAL = 20
         print("Running at level 3")
-RW_SD = 0.0003
-RW_SD_INIT = 0.004
+RW_SD = 0.02
+RW_SD_INIT = 0.1
 COOLING_RATE = 0.987
 
 # Data Manipulation
@@ -73,9 +73,9 @@ def rproc(state, params, key, covars = None):
     mu, kappa, theta, xi, rho, V_0 = params
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
-    xi = jnp.exp(xi)
     kappa = jnp.exp(kappa)
     theta = jnp.exp(theta)
+    xi = jnp.exp(xi)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Make sure t is cast as an int
     t = t.astype(int)
@@ -97,6 +97,7 @@ def rproc(state, params, key, covars = None):
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
     V_0 = jnp.exp(params[5])
+    #V_0 = jnp.exp(jnp.clip(params[5], a_min=-10, a_max=0))
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
@@ -125,6 +126,7 @@ sp500_box = pd.DataFrame({
     "theta": np.log([0.000075, 0.0002]),
     "xi": np.log([5e-4, 1e-2]),
     "rho": funky_transform([0.5, 0.9]),
+    #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95))
     "V_0": np.log([1e-6, 1e-4])
 })
 
