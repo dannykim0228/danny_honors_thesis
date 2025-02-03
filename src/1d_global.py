@@ -23,9 +23,7 @@ else:
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
 MAIN_SEED = 631409
 np.random.seed(MAIN_SEED)
-GPUS = 1
-print("gpus:", GPUS)
-RUN_LEVEL = 1
+RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2 # Number of particles for filtering
@@ -33,28 +31,24 @@ match RUN_LEVEL:
         NREPS_FITR = 3 # Replicates for each step
         NP_EVAL = 2
         NREPS_EVAL = 5 # Replicates for each step
-        NREPS_EVAL2 = 5 # Replicates for each step
         print("Running at level 1")
     case 2:
-        #NP_FITR = 100
         NP_FITR = 1000
         NFITR = 20
         NREPS_FITR = 3
-        #NP_EVAL = 100
         NP_EVAL = 1000
         NREPS_EVAL = 5
-        NREPS_EVAL2 = 5
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
-        NFITR = 200
-        NREPS_FITR = GPUS
+        NFITR = 100
+        NREPS_FITR = 20
         NP_EVAL = 5000
-        NREPS_EVAL = GPUS
-        NREPS_EVAL2 = GPUS*8
+        NREPS_EVAL = 20
         print("Running at level 3")
-#RW_SD = 0.001 # SD for random walk parameter perturbations
-#RW_SD_INIT = 0.01
+    
+#RW_SD = 0.02 # SD for random walk parameter perturbations
+#RW_SD_INIT = 0.1
 RW_SD = 0.0003
 RW_SD_INIT = 0.004
 # COOLING_RATE = 0.98623  # This number raised to 50 is approx 0.5, so equivalent to cooling.fraction.50 = 0.5 in R
@@ -85,9 +79,9 @@ def rproc(state, params, key, covars = None):
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     #mu = 3.71e-4
-    xi = jnp.exp(xi)
     kappa = jnp.exp(kappa)
     theta = jnp.exp(theta)
+    xi = jnp.exp(xi)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Make sure t is cast as an int
     t = t.astype(int)
@@ -96,8 +90,7 @@ def rproc(state, params, key, covars = None):
     dWs = (covars[t] - mu + 0.5 * V) / jnp.sqrt(V)
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
-    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
-    #V = V + kappa * (theta - V) + xi * jnp.sqrt(V) * dWv
+    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
     V = V + kappa * (theta - V) + xi * jnp.sqrt(jnp.maximum(V, 0.0)) * dWv
     t += 1
     # Feller condition to keep V positive
@@ -111,7 +104,7 @@ def rproc(state, params, key, covars = None):
 # Initialization Model
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
-    V_0 = jnp.exp(params[5]) #Need to Check with Aaron
+    V_0 = jnp.exp(params[5])
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
@@ -139,7 +132,7 @@ def funky_transform(lst):
 # ----------------------------------------------------------------
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
-    "mu": np.log([1e-6, 1e-4]),
+    "mu": np.log([1e-6, 1e-4]), 
     "kappa": np.log([1e-8, 0.1]),
     "theta": np.log([0.000075, 0.0002]),
     #"xi": np.log([1e-8, 1e-2]),-Aaron Check
@@ -149,6 +142,30 @@ sp500_box = pd.DataFrame({
     "rho": funky_transform([0.5, 0.9]),
     "V_0": np.log([1e-6, 1e-4])
 })
+"""
+sp500_box = pd.DataFrame({
+    # Parameters are transformed onto the perturbation scale
+    "mu": [1e-6, 1e-4],
+    "kappa": [1e-8, 0.1],
+    "theta": [0.000075, 0.0002],
+    "xi": [1e-8, 1e-2],
+    "rho": [-0.9, 0.9],
+    "V_0": [1e-6, 1e-4]
+})
+
+def runif_design(box, n_draws):
+    draw_frame = pd.DataFrame()
+    for param in box.columns:
+        draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+    draw_frame["mu"] = np.log(draw_frame["mu"])
+    draw_frame["kappa"] = np.log(draw_frame["kappa"])
+    draw_frame["theta"] = np.log(draw_frame["theta"])
+    draw_frame["xi"] = np.log(draw_frame["xi"])
+    draw_frame["rho"] = funky_transform(draw_frame["rho"])
+    draw_frame["V_0"] = np.log(draw_frame["V_0"])
+    return draw_frame
+"""
+
 
 def runif_design(box, n_draws):
     """Draws parameters from a given box."""
@@ -219,6 +236,7 @@ for rep in range(NREPS_FITR):
 
     # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
 
+    optimized_theta = fit_out[rep][1][-1].mean(axis = 0)
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
     # already saved in the model object, so we need to remake the model object
     # Evaluate model using PF
@@ -229,13 +247,13 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        theta = fit_out[rep][1][-1].mean(axis = 0),
+        theta = optimized_theta,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
     # TODO: Make sure multiple pfilters use different seeds
     pf_out2 = []
-    for pf_rep in range(NREPS_EVAL): #split R.N.G
+    for pf_rep in range(NREPS_EVAL): # split R.N.G
         # JAX seed needs to be changed manually
         key, subkey = random.split(key = key)
         pf_out2.append(pypomp.pfilter.pfilter(
@@ -244,8 +262,6 @@ for rep in range(NREPS_FITR):
             thresh = 0,
             key = subkey
         ))
-        # Potential Issue: Ensure key argument in Python’s random.split ensures independent random streams for each replicate
-        # Potential Issue: Confirm R’s registerDoRNG matches Python’s seed handling for reproducibility
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 
 results_out = {
