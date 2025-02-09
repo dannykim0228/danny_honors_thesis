@@ -204,7 +204,8 @@ initial_params_df = runif_design(sp500_box, NREPS_FITR)
 # Fit POMP model using IF
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
-fit_out = []
+fit_out_if2 = []
+fit_out_ifad = []
 pf_out = []
 for rep in range(NREPS_FITR):
     # Apparently the theta argument for pypomp.fit doesn't override whatever is
@@ -221,8 +222,9 @@ for rep in range(NREPS_FITR):
         theta = jnp.array(initial_params_df.iloc[rep]),
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
-    )      
-    fit_out.append(pypomp.fit.fit(
+    )
+    # IF2 Fit      
+    fit_out_if2.append(pypomp.fit.fit(
         pomp_object = sp500_model,
         # theta = jnp.array(initial_params_df.iloc[rep]),
         J = NP_FITR,
@@ -234,9 +236,19 @@ for rep in range(NREPS_FITR):
         thresh_mif = 0
     ))
 
+    # IFAD Fit
+    theta_if2_final = fit_out_if2[rep][1][-1].mean(axis = 0)
+    fit_out_ifad.append(pypomp.fit.fit(
+        pomp_object = sp500_model, 
+        theta = theta_if2_final, 
+        J = NP_FITR, 
+        M = NFITR, 
+        mode = "IFAD"
+    ))
+
     # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
 
-    optimized_theta = fit_out[rep][1][-1].mean(axis = 0)
+    
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
     # already saved in the model object, so we need to remake the model object
     # Evaluate model using PF
@@ -247,7 +259,7 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        theta = optimized_theta,
+        theta = theta_if2_final,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
@@ -265,7 +277,8 @@ for rep in range(NREPS_FITR):
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 
 results_out = {
-    "fit_out": fit_out,
+    "fit_out_if2": fit_out_if2,
+    "fit_out_ifad": fit_out_ifad,
     "pf_out": pf_out,
 }
 end_time = datetime.datetime.now()
