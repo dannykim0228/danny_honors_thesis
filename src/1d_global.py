@@ -104,7 +104,8 @@ def rproc(state, params, key, covars = None):
 # Initialization Model
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
-    V_0 = jnp.exp(params[5])
+    #V_0 = jnp.exp(params[5])
+    V_0 = jnp.exp(jnp.clip(params[5], a_min=-10, a_max=0))
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
@@ -139,7 +140,8 @@ sp500_box = pd.DataFrame({
     #"rho": funky_transform([1e-8, 1 - 1e-8]),
     #"V_0": np.log([1e-10, 1e-4])
     "xi": np.log([5e-4, 1e-2]),
-    "rho": funky_transform([0.5, 0.9]),
+    #"rho": funky_transform([0.5, 0.9]),
+    "rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95)),
     "V_0": np.log([1e-6, 1e-4])
 })
 """

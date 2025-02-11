@@ -26,11 +26,11 @@ np.random.seed(MAIN_SEED)
 RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
-        NP_FITR = 2 # Number of particles for filtering
-        NFITR = 2 # Number of iterated filtering steps
-        NREPS_FITR = 3 # Replicates for each step
+        NP_FITR = 2
+        NFITR = 2
+        NREPS_FITR = 3
         NP_EVAL = 2
-        NREPS_EVAL = 5 # Replicates for each step
+        NREPS_EVAL = 5
         print("Running at level 1")
     case 2:
         NP_FITR = 1000
@@ -66,8 +66,6 @@ sp500_ivp_names = ["V_0"]
 sp500_parameters = sp500_rp_names + sp500_ivp_names
 sp500_covarnames = ["covaryt"]
 
-
-# ----------------------------------------------------------------
 def rproc(state, params, key, covars = None):
     V, S, t = state
     mu, kappa, theta, xi, rho, V_0 = params
@@ -100,8 +98,6 @@ def rinit(params, J, covars = None):
     #V_0 = jnp.exp(jnp.clip(params[5], a_min=-10, a_max=0))
     S_0 = 1105  # Initial price
     t = 0
-    # Result must be returned as a JAX array. For rinit, the states must be replicated
-    # for each particle
     return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
 
 
@@ -118,7 +114,6 @@ def funky_transform(lst):
     out = [np.log((1 + x) / (1 - x)) for x in lst]
     return out
 
-# ----------------------------------------------------------------
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
     "mu": np.log([1e-6, 1e-4]),
@@ -126,7 +121,7 @@ sp500_box = pd.DataFrame({
     "theta": np.log([0.000075, 0.0002]),
     "xi": np.log([5e-4, 1e-2]),
     "rho": funky_transform([0.5, 0.9]),
-    #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95))
+    #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95)),
     "V_0": np.log([1e-6, 1e-4])
 })
 
@@ -141,15 +136,13 @@ initial_params_df = runif_design(sp500_box, NREPS_FITR)
 print("Checking initial_params_df values (first 5 rows):") # Checking parameters are in perturbation scale
 print(initial_params_df.head()) # For Debugging
 
-# Fit POMP model using IF
+
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
-fit_out = []
+fit_out_if2 = []
+fit_out_ifad = []
 pf_out = []
 for rep in range(NREPS_FITR):
-    # Apparently the theta argument for pypomp.fit doesn't override whatever is
-    # already saved in the model object, so we need to remake the model object each rep.
-    # Initialize POMP model
     theta_check = jnp.array(initial_params_df.iloc[rep])
     print(f"Checking theta values before running POMP model for rep {rep}:")
     print("e-transformed positive parameters:", jnp.exp(theta_check[:4]))  # > 0
@@ -161,14 +154,13 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        #theta = jnp.array(initial_params_df.iloc[0]),-Aaron Check
         theta = theta_check,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
-    )      
-    fit_out.append(pypomp.fit.fit(
+    )
+    # IF2 Fit      
+    fit_out_if2.append(pypomp.fit.fit(
         pomp_object = sp500_model,
-        # theta = jnp.array(initial_params_df.iloc[rep]),
         J = NP_FITR,
         M = NFITR,
         a = COOLING_RATE,
@@ -178,9 +170,16 @@ for rep in range(NREPS_FITR):
         thresh_mif = 0
     ))
 
-    # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
-    # already saved in the model object, so we need to remake the model object
-    # Evaluate model using PF
+    # IFAD Fit
+    theta_if2_final = fit_out_if2[rep][1][-1].mean(axis = 0)
+    fit_out_ifad.append(pypomp.fit.fit(
+        pomp_object = sp500_model, 
+        theta = theta_if2_final, 
+        J = NP_FITR, 
+        M = NFITR, 
+        mode = "IFAD"
+    ))
+
     model_for_pfilter = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -188,14 +187,13 @@ for rep in range(NREPS_FITR):
         # Observed log returns
         ys = jnp.array(sp500['y'].values),
         # Initial parameters
-        theta = fit_out[rep][1][-1].mean(axis = 0),
+        theta = theta_if2_final,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
-    # TODO: Make sure multiple pfilters use different seeds
+
     pf_out2 = []
-    for pf_rep in range(NREPS_EVAL): #split R.N.G
-        # JAX seed needs to be changed manually
+    for pf_rep in range(NREPS_EVAL):
         key, subkey = random.split(key = key)
         pf_out2.append(pypomp.pfilter.pfilter(
             pomp_object = model_for_pfilter,
@@ -206,10 +204,11 @@ for rep in range(NREPS_FITR):
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
 
 results_out = {
-    "fit_out": fit_out,
+    "fit_out_if2": fit_out_if2,
+    "fit_out_ifad": fit_out_ifad,
     "pf_out": pf_out,
 }
 end_time = datetime.datetime.now()
-print(end_time - start_time) # run time
-print(pf_out) # Print LL estimates
+print(end_time - start_time)
+print(pf_out)
 pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
