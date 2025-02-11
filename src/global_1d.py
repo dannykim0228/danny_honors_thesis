@@ -176,7 +176,9 @@ for rep in range(NREPS_FITR):
         pomp_object = sp500_model, 
         theta = theta_if2_final, 
         J = NP_FITR, 
-        M = NFITR, 
+        M = NFITR,
+        sigmas = RW_SD,
+        sigmas_init = RW_SD_INIT, 
         mode = "IFAD"
     ))
 
