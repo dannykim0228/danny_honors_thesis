@@ -244,10 +244,29 @@ for rep in range(NREPS_FITR):
         pomp_object = sp500_model, 
         theta = theta_if2_final, 
         J = NP_FITR, 
-        M = NFITR, 
+        M = 0, 
         #sigmas = RW_SD,
         #sigmas_init = RW_SD_INIT,
+        # increase number of iteration
         mode = "IFAD"
+        """
+        M = 10, 
+        a = 0.9, 
+        method = 'Newton', 
+        itns = 20, 
+        beta = 0.9, 
+        eta = 0.0025, 
+        c = 0.1, 
+        max_ls_itn = 10,
+        thresh_mif = 100, 
+        thresh_tr = 100, 
+        verbose = False, 
+        scale = False, 
+        ls = False, 
+        alpha = 0.1, 
+        monitor = True, 
+        mode = "IFAD"
+        """
     ))
 
     # Potential Issue: Verify sigmas(perturbation scale) is equivalent in both implementations
@@ -271,7 +290,7 @@ for rep in range(NREPS_FITR):
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL): # split R.N.G
         # JAX seed needs to be changed manually
-        key, subkey = random.split(key = key)
+        key, subkey = random.split(key) # Fixed
         pf_out2.append(pypomp.pfilter.pfilter(
             pomp_object = model_for_pfilter,
             J = NP_EVAL,
