@@ -43,7 +43,7 @@ rproc1 <- "
   dWv = rho * dWs + sqrt(1 - rho * rho) * dZ;
 
   S += S * (mu + sqrt(fmax(V, 0.0)) * dWs);
-  
+  V += kappa * (theta - V) + xi * sqrt(fmax(V, 0.0)) * dWv;
   // S & V are updated based on this process, ensuring V stays positive
   if (V<=0) {
     V=1e-32;
@@ -209,19 +209,6 @@ mle_params <- c(
   xi = 2.22e-3,
   rho = -7.29e-1
 )
-
-"""
-pfilter_results <- pfilter(
-  sp500.filt,
-  params = mle_params,
-  Np = sp500_Np  
-)
-
-log_likelihood <- logLik(pfilter_results)
-print(log_likelihood)
-print(pfilter_results)
-"""
-
 
 num_reps <- 10
 
