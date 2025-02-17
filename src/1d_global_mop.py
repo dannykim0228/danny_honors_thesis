@@ -47,6 +47,7 @@ match RUN_LEVEL:
 
 # Data Manipulation
 sp500_raw = pd.read_csv("C:/Users/ravis/OneDrive/Documents/danny_honors_thesis/data/SPX.csv")
+#sp500_raw = pd.read_csv("/home/kimdanny/danny_honors_thesis/data/SPX.csv")
 sp500 = sp500_raw.copy()
 sp500['date'] = pd.to_datetime(sp500['Date'])
 sp500['diff_days'] = (sp500['date'] - sp500['date'].min()).dt.days
@@ -116,6 +117,7 @@ pf_out = []
 
 for rep in range(NREPS_FITR):
     theta_check = jnp.array(initial_params_df.iloc[rep])
+    # sp500_model is initialized using theta_check drawn randomly from initial_params_df
     sp500_model = pypomp.pomp_class.Pomp(
         rinit = rinit, 
         rproc = rproc, 
@@ -125,29 +127,57 @@ for rep in range(NREPS_FITR):
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
 
-    fit_out_gd.append(pypomp.fit.fit(
+    # Stores optimized parameter estimates in fit_out_gd
+    fit_result = pypomp.fit.fit(
         pomp_object = sp500_model,
         J = NP_FITR,
         method = "Newton",
         itns = 20,
         mode = "GD"
-    ))
+    )
+    print("fit_result type:", type(fit_result))
+    print(fit_result)
+    fit_out_gd.append(fit_result)
+    # Step size-paramters for paramters
+    # doesn't support AD
+    # Return: tuple - (LL array, optimized parameters array)
 
+    """
     pf_out.append(pypomp.pfilter.pfilter(
         pomp_object = sp500_model,
         J = NP_EVAL,
         thresh = 0
     ))
+    """
+    # initial pfiltering performed on unoptimized parameters
+    # filtering-needs after optimization step using fitted parameters
+    
+    # Create new POMP model using optimized parameters
+    model_for_pfilter = pypomp.pomp_class.Pomp(
+        rinit = rinit,
+        rproc = rproc,
+        dmeas = dmeasure,
+        ys = jnp.array(sp500['y'].values),
+        theta = fit_result[1],  # Use optimized parameters from fit()
+        covars = jnp.insert(sp500['y'].values, 0, 0)
+    )
+    
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL): 
         key, subkey = random.split(key)
         pf_out2.append(pypomp.pfilter.pfilter(
-            pomp_object = sp500_model,
+            pomp_object = model_for_pfilter,
+            # assigning pomp_object to JAX array, not POMP model
             J = NP_EVAL,
             thresh = 0,
             key = subkey
         ))
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
+    print("pf type:", type(pf_out))
+    print(pf_out)
+    print("pf2 type:", type(pf_out2))
+    print(pf_out2)
+
 
 results_out = {"fit_out": fit_out_gd, "pf_out": pf_out}
 end_time = datetime.datetime.now()
