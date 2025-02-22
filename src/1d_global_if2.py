@@ -15,9 +15,9 @@ print("Current system time:", datetime.datetime.now())
 
 out_dir = os.environ.get("out_dir")
 if out_dir is None:
-    SAVE_RESULTS_TO = "output/default_output/1d_global_out.pkl"
+    SAVE_RESULTS_TO = "output/default_output/1d_global_if2_out.pkl"
 else:
-    SAVE_RESULTS_TO = out_dir + "1d_global_out.pkl"
+    SAVE_RESULTS_TO = out_dir + "1d_global_if2_out.pkl"
 
 #SJNN = os.environ.get("SLURM_JOB_NUM_NODES")
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
@@ -40,7 +40,7 @@ match RUN_LEVEL:
         NREPS_EVAL = 5
         print("Running at level 2")
     case 3:
-        NP_FITR = 1000
+        NP_FITR = 5000
         NFITR = 100
         NREPS_FITR = 20
         NP_EVAL = 5000
@@ -95,8 +95,8 @@ def rproc(state, params, key, covars = None):
 # Initialization Model
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
-    V_0 = jnp.exp(params[5])
-    #V_0 = jnp.exp(jnp.clip(params[5], a_min=-10, a_max=0))
+    #V_0 = jnp.exp(params[5])
+    V_0 = jnp.exp(jnp.clip(params[5], a_min = -10, a_max = 0))
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
@@ -117,6 +117,7 @@ def funky_transform(lst):
     out = [np.log((1 + x) / (1 - x)) for x in lst]
     return out
 
+"""
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
     "mu": np.log([1e-6, 1e-4]),
@@ -127,6 +128,15 @@ sp500_box = pd.DataFrame({
     #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95))
     "V_0": np.log([1e-6, 1e-4])
 })
+"""
+sp500_box = pd.DataFrame({
+    "mu": np.log([3.71e-4, 3.71e-4]),
+    "kappa": np.log([3.25e-2, 3.25e-2]),
+    "theta": np.log([1.09e-4, 1.09e-4]),
+    "xi": np.log([2.22e-3, 2.22e-3]),
+    "rho": funky_transform([-7.29e-1, -7.29e-1]),
+    "V_0": np.log([(7.86e-3)**2, (7.86e-3)**2])
+})
 
 def runif_design(box, n_draws):
     """Draws parameters from a given box."""
@@ -136,8 +146,6 @@ def runif_design(box, n_draws):
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
-print("Checking initial_params_df values (first 5 rows):") # Checking parameters are in perturbation scale
-print(initial_params_df.head()) # For Debugging
 
 # Fit POMP model using IF
 start_time = datetime.datetime.now()
@@ -145,13 +153,7 @@ key = random.key(MAIN_SEED)
 fit_out = []
 pf_out = []
 for rep in range(NREPS_FITR):
-    # Apparently the theta argument for pypomp.fit doesn't override whatever is
-    # already saved in the model object, so we need to remake the model object each rep.
-    # Initialize POMP model
     theta_check = jnp.array(initial_params_df.iloc[rep])
-    print(f"Checking theta values before running POMP model for rep {rep}:")
-    print("e-transformed positive parameters:", jnp.exp(theta_check[:4]))  # > 0
-    print("Transformed rho:", -1 + 2 / (1 + jnp.exp(-theta_check[4])))  # (-1,1)
     sp500_model = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -174,9 +176,6 @@ for rep in range(NREPS_FITR):
         thresh_mif = 0
     ))
 
-    # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
-    # already saved in the model object, so we need to remake the model object
-    # Evaluate model using PF
     model_for_pfilter = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -190,7 +189,7 @@ for rep in range(NREPS_FITR):
     )
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL): 
-        key, subkey = random.split(key) # Fixed this part
+        key, subkey = random.split(key)
         pf_out2.append(pypomp.pfilter.pfilter(
             pomp_object = model_for_pfilter,
             J = NP_EVAL,
