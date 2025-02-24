@@ -96,7 +96,8 @@ def rproc(state, params, key, covars = None):
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
     #V_0 = jnp.exp(params[5])
-    V_0 = jnp.exp(jnp.clip(params[5], a_min = -10, a_max = 0))
+    #V_0 = jnp.exp(jnp.clip(params[5], a_min = -10, a_max = 0))
+    V_0 = 7.86e-3 ** 2
     S_0 = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
