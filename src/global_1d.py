@@ -40,18 +40,19 @@ match RUN_LEVEL:
         NREPS_EVAL = 5
         print("Running at level 2")
     case 3:
-        NP_FITR = 1000
+        NP_FITR = 5000
         NFITR = 100
         NREPS_FITR = 20
         NP_EVAL = 5000
-        NREPS_EVAL = 20
+        NREPS_EVAL = 24
         print("Running at level 3")
 RW_SD = 0.02
 RW_SD_INIT = 0.1
 COOLING_RATE = 0.987
 
 # Data Manipulation
-sp500_raw = pd.read_csv("C:/Users/ravis/OneDrive/Documents/danny_honors_thesis/data/SPX.csv")
+#sp500_raw = pd.read_csv("C:/Users/ravis/OneDrive/Documents/danny_honors_thesis/data/SPX.csv")
+sp500_raw = pd.read_csv("/home/kimdanny/danny_honors_thesis/data/SPX.csv")
 sp500 = sp500_raw.copy()
 sp500['date'] = pd.to_datetime(sp500['Date'])
 sp500['diff_days'] = (sp500['date'] - sp500['date'].min()).dt.days
@@ -69,15 +70,12 @@ sp500_covarnames = ["covaryt"]
 def rproc(state, params, key, covars = None):
     V, S, t = state
     mu, kappa, theta, xi, rho, V_0 = params
-    # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     kappa = jnp.exp(kappa)
     theta = jnp.exp(theta)
     xi = jnp.exp(xi)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
-    # Make sure t is cast as an int
     t = t.astype(int)
-    # Wiener process generation (Gaussian noise)
     dZ = random.normal(key)
     dWs = (covars[t] - mu + 0.5 * V) / jnp.sqrt(V)
     # dWv with correlation
@@ -85,18 +83,16 @@ def rproc(state, params, key, covars = None):
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 0.0)) * dWs)
     V = V + kappa * (theta - V) + xi * jnp.sqrt(jnp.maximum(V, 0.0)) * dWv
     t += 1
-    # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
-    # Results must be returned as a JAX array
     return jnp.array([V, S, t])
 
 
 # Initialization Model
 def rinit(params, J, covars = None):
-    # Transform V_0 onto natural scale
-    V_0 = jnp.exp(params[5])
+    #V_0 = jnp.exp(params[5])
     #V_0 = jnp.exp(jnp.clip(params[5], a_min=-10, a_max=0))
-    S_0 = 1105  # Initial price
+    V_0 = 7.86e-3 ** 2
+    S_0 = 1105
     t = 0
     return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
 
@@ -104,7 +100,6 @@ def rinit(params, J, covars = None):
 # Measurement model: how we measure state
 def dmeasure(y, state, params):
     V, S, t = state
-    # Transform mu onto the natural scale
     mu = jnp.exp(params[0])
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
@@ -115,14 +110,12 @@ def funky_transform(lst):
     return out
 
 sp500_box = pd.DataFrame({
-    # Parameters are transformed onto the perturbation scale
-    "mu": np.log([1e-6, 1e-4]),
-    "kappa": np.log([1e-8, 0.1]),
-    "theta": np.log([0.000075, 0.0002]),
-    "xi": np.log([5e-4, 1e-2]),
-    "rho": funky_transform([0.5, 0.9]),
-    #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95)),
-    "V_0": np.log([1e-6, 1e-4])
+    "mu": np.log([3.71e-4, 3.71e-4]),
+    "kappa": np.log([3.25e-2, 3.25e-2]),
+    "theta": np.log([1.09e-4, 1.09e-4]),
+    "xi": np.log([2.22e-3, 2.22e-3]),
+    "rho": funky_transform([-7.29e-1, -7.29e-1]),
+    "V_0": np.log([(7.86e-3)**2, (7.86e-3)**2])
 })
 
 def runif_design(box, n_draws):
@@ -133,8 +126,8 @@ def runif_design(box, n_draws):
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
-print("Checking initial_params_df values (first 5 rows):") # Checking parameters are in perturbation scale
-print(initial_params_df.head()) # For Debugging
+#print("Checking initial_params_df values (first 5 rows):") # Checking parameters are in perturbation scale
+#print(initial_params_df.head()) # For Debugging
 
 
 start_time = datetime.datetime.now()
@@ -144,18 +137,15 @@ fit_out_ifad = []
 pf_out = []
 for rep in range(NREPS_FITR):
     theta_check = jnp.array(initial_params_df.iloc[rep])
-    print(f"Checking theta values before running POMP model for rep {rep}:")
-    print("e-transformed positive parameters:", jnp.exp(theta_check[:4]))  # > 0
-    print("Transformed rho:", -1 + 2 / (1 + jnp.exp(-theta_check[4])))  # (-1,1)
+    #print(f"Checking theta values before running POMP model for rep {rep}:")
+    #print("e-transformed positive parameters:", jnp.exp(theta_check[:4]))  # > 0
+    #print("Transformed rho:", -1 + 2 / (1 + jnp.exp(-theta_check[4])))  # (-1,1)
     sp500_model = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
-        # Observed log returns
         ys = jnp.array(sp500['y'].values),
-        # Initial parameters
         theta = theta_check,
-        # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
     # IF2 Fit      
@@ -176,7 +166,7 @@ for rep in range(NREPS_FITR):
         pomp_object = sp500_model, 
         theta = theta_if2_final, 
         J = NP_FITR, 
-        M = NFITR,
+        M = 0,
         sigmas = RW_SD,
         sigmas_init = RW_SD_INIT, 
         mode = "IFAD"
@@ -186,17 +176,14 @@ for rep in range(NREPS_FITR):
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
-        # Observed log returns
         ys = jnp.array(sp500['y'].values),
-        # Initial parameters
         theta = theta_if2_final,
-        # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
 
     pf_out2 = []
     for pf_rep in range(NREPS_EVAL):
-        key, subkey = random.split(key = key)
+        key, subkey = random.split(key)
         pf_out2.append(pypomp.pfilter.pfilter(
             pomp_object = model_for_pfilter,
             J = NP_EVAL,
