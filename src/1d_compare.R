@@ -23,8 +23,10 @@ sp500 <- sp500_raw%>%
 
 sp500_statenames <- c("V", "S")
 sp500_rp_names <- c("mu", "kappa", "theta", "xi", "rho") 
-sp500_ivp_names <- c("V_0")
-sp500_parameters <- c(sp500_rp_names, sp500_ivp_names)
+#sp500_ivp_names <- c("V_0")
+#sp500_parameters <- c(sp500_rp_names, sp500_ivp_names)
+sp500_ivp_names <- c()
+sp500_parameters <- sp500_rp_names
 sp500_covarnames <- "covaryt"
 
 
@@ -34,21 +36,20 @@ rproc1 <- "
   rt = covaryt;
   dWs = (rt - mu + 0.5 * V) / (sqrt(V));
   dZ = rnorm(0, 1); // Generate standard normal noise for the stochastic process
-  
   dWv = rho * dWs + sqrt(1 - rho * rho) * dZ;
 
   S += S * (mu + sqrt(fmax(V, 0.0)) * dWs);
   V += kappa * (theta - V) + xi * sqrt(fmax(V, 0.0)) * dWv;
   // S & V are updated based on this process, ensuring V stays positive
-  if (V<=0) {
-    V=1e-32;
+  if (V <= 0) {
+    V = 1e-32;
   } 
 "
 
 
 sp500_rinit <- "
-  V = (7.86e-3)**2; // V_0 is a parameter as well
-  S = 1105; // 1105 is the starting price
+  V = 7.86e-3 * 7.86e-3;
+  S = 1105;
 "
 
 
@@ -69,7 +70,7 @@ my_ToTrans <- "
      T_xi = log(xi);
      T_kappa = log(kappa);
      T_theta = log(theta);
-     T_V_0 = log(V_0);
+     // T_V_0 = log(V_0);
      T_mu = log(mu);
      T_rho = log((rho + 1) / (1 - rho));
   "
@@ -79,7 +80,7 @@ my_FromTrans <- "
     kappa = exp(T_kappa);
     theta = exp(T_theta);
     xi = exp(T_xi);
-    V_0 = exp(T_V_0);
+    // V_0 = exp(T_V_0);
     mu = exp(T_mu);
     rho = -1 + 2 / (1 + exp(-T_rho));
   "
@@ -90,7 +91,7 @@ sp500_partrans <- parameter_trans(
 )
 
 
-# Construct Filter Object -------------------------------------------------
+# Construct Filter Object
 # Defines full POMP model
 sp500.filt <- pomp(
   data = data.frame(
@@ -119,7 +120,7 @@ sp500_rw.sd_ivp <- 0.1
 sp500_cooling.fraction50 <- 0.5
 
 
-# Filter POMP to data -----------------------------------------------------
+# Filter POMP to data
 sp500_rw.sd <- rw_sd(
   mu = sp500_rw.sd_rp,
   theta = sp500_rw.sd_rp,
@@ -131,13 +132,13 @@ sp500_rw.sd <- rw_sd(
 )
 
 run_level <- 4
-sp500_Np <-           switch(run_level, 100,  200, 500, 1000)
-sp500_Nmif <-         switch(run_level,  10,  25,  50, 200)
-sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24)
-sp500_Nreps_local <-  switch(run_level,  10,  15,  20,  24)
-sp500_Nreps_global <- switch(run_level,  10,  15,  20, 120)
+sp500_Np <-           switch(run_level, 100,  200, 500, 10000) # Matched with NP_FITR, NP_EVAL
+sp500_Nmif <-         switch(run_level,  10,  25,  50, 10) # Matched with NFITR
+sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS_EVAL
+# sp500_Nreps_local <-  switch(run_level,  10,  15,  20,  24) # Not used
+sp500_Nreps_global <- switch(run_level,  10,  15,  20, 20) # Matched with NREPS_FITR
 
-
+"""
 sp500_box <- rbind(
   mu = c(3.71e-4, 3.71e-4), 
   theta = c(1.09e-4, 1.09e-4),
@@ -146,7 +147,15 @@ sp500_box <- rbind(
   rho = c(-7.29e-1, -7.29e-1),
   V_0 = c((7.86e-3)**2, (7.86e-3)**2),
 )
-
+"""
+sp500_box <- rbind(
+  mu = c(1e-6, 1e-4), 
+  theta = c(0.000075, 0.0002),
+  kappa = c(1e-8, 0.1),
+  xi = c(1e-8, 1e-2),
+  rho = c(1e-8, 1),
+  V_0 = c((7.86e-3)**2, (7.86e-3)**2),
+)
 # Generate random initial parameter sets for each global search iteration
 global_starts <- pomp::runif_design(
   lower = sp500_box[ , 1],
@@ -157,6 +166,11 @@ global_starts <- pomp::runif_design(
 # Feller's Condition
 global_starts$xi <- runif(n = nrow(global_starts), min = 0, max = sqrt(global_starts$kappa * global_starts$theta *2)) #kappa<2*xi*theta
 
+
+initial_params <- read.csv("initial_params.csv")
+
+# Ensure same number of replicates
+sp500_Nreps_global <- nrow(initial_params)
 
 # Each iteration starts with different set of initial parameters from global_starts
 # pfilter evaluates LL across replications and logmeanexp calculates average LL with SE
@@ -170,7 +184,7 @@ stew(file = sprintf("ENTER_FILE_NAME.rds"), {
                           rw.sd = sp500_rw.sd,
                           cooling.fraction.50 = sp500_cooling.fraction50,
                           Np = sp500_Np,
-                          params = unlist(global_starts[i, ])
+                          params = unlist(initial_params[i, ]) # Use fixed initial values
                         )
                       } # if.box contains all estimates of parameters (list of mif objects)
     
@@ -182,5 +196,7 @@ stew(file = sprintf("ENTER_FILE_NAME.rds"), {
                          ), 
                          se = TRUE)
                      } # matrix containing logLik and SE for each time 
+    write.csv(L.box, "if2_ll_r.csv", row.names = FALSE)
+    print("Saved IF2 LL traces to R csv")
   })
 })
