@@ -26,11 +26,11 @@ np.random.seed(MAIN_SEED)
 RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
-        NP_FITR = 2 # Number of particles for filtering
-        NFITR = 2 # Number of iterated filtering steps
-        NREPS_FITR = 3 # Replicates for each step
-        NP_EVAL = 2
-        NREPS_EVAL = 5 # Replicates for each step
+        NP_FITR = 2 # Number of particles used in IF2
+        NFITR = 2 # Number of IF steps
+        NREPS_FITR = 3 # Number of independent IF2 runs from different starting parameter values
+        NP_EVAL = 2 # Number of particles used in pfilter for LL evaluation
+        NREPS_EVAL = 5 # Number of pfilter eval to compute LL after IF2
         print("Running at level 1")
     case 2:
         NP_FITR = 1000
@@ -40,11 +40,11 @@ match RUN_LEVEL:
         NREPS_EVAL = 5
         print("Running at level 2")
     case 3:
-        NP_FITR = 5000
-        NFITR = 100
-        NREPS_FITR = 20
+        NP_FITR = 5000 
+        NFITR = 10
+        NREPS_FITR = 20 # Increase to 60
         NP_EVAL = 5000
-        NREPS_EVAL = 20
+        NREPS_EVAL = 24 # Increased from 20
         print("Running at level 3")
 RW_SD = 0.02
 RW_SD_INIT = 0.1
@@ -118,6 +118,16 @@ def funky_transform(lst):
     out = [np.log((1 + x) / (1 - x)) for x in lst]
     return out
 
+sp500_box = pd.DataFrame({
+    # Parameters are transformed onto the perturbation scale
+    "mu": [3.71e-4, 3.71e-4],
+    "kappa": [3.25e-2, 3.25e-2],
+    "theta": [1.09e-4, 1.09e-4],
+    "xi": [2.22e-3, 2.22e-3],
+    "rho": [-7.29e-1, -7.29e-1],
+    "V_0": [(7.86e-3)**2, (7.86e-3)**2]
+})
+
 """
 sp500_box = pd.DataFrame({
     # Parameters are transformed onto the perturbation scale
@@ -129,7 +139,7 @@ sp500_box = pd.DataFrame({
     #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95))
     "V_0": np.log([1e-6, 1e-4])
 })
-"""
+
 sp500_box = pd.DataFrame({
     "mu": np.log([3.71e-4, 3.71e-4]),
     "kappa": np.log([3.25e-2, 3.25e-2]),
@@ -138,12 +148,20 @@ sp500_box = pd.DataFrame({
     "rho": funky_transform([-7.29e-1, -7.29e-1]),
     "V_0": np.log([(7.86e-3)**2, (7.86e-3)**2])
 })
-
+"""
 def runif_design(box, n_draws):
     """Draws parameters from a given box."""
     draw_frame = pd.DataFrame()
     for param in box.columns:
         draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+    
+    draw_frame["mu"] = np.log(draw_frame["mu"])
+    draw_frame["kappa"] = np.log(draw_frame["kappa"])
+    draw_frame["theta"] = np.log(draw_frame["theta"])
+    draw_frame["xi"] = np.log(draw_frame["xi"])
+    draw_frame["rho"] = funky_transform(draw_frame["rho"])
+    draw_frame["V_0"] = np.log(draw_frame["V_0"])
+
     return draw_frame
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
