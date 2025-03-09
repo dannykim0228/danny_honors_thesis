@@ -134,7 +134,7 @@ sp500_rw.sd <- rw_sd(
 run_level <- 4
 sp500_Np <-           switch(run_level, 100,  200, 500, 10000) # Matched with NP_FITR, NP_EVAL
 sp500_Nmif <-         switch(run_level,  10,  25,  50, 10) # Matched with NFITR
-sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS_EVAL
+sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS_EVAL, Not using
 # sp500_Nreps_local <-  switch(run_level,  10,  15,  20,  24) # Not used
 sp500_Nreps_global <- switch(run_level,  10,  15,  20, 20) # Matched with NREPS_FITR
 
