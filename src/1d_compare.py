@@ -15,9 +15,9 @@ print("Current system time:", datetime.datetime.now())
 
 out_dir = os.environ.get("out_dir")
 if out_dir is None:
-    SAVE_RESULTS_TO = "output/default_output/1d_global_if2_out.pkl"
+    SAVE_RESULTS_TO = "output/default_output/1d_compare_out.pkl"
 else:
-    SAVE_RESULTS_TO = out_dir + "1d_global_if2_out.pkl"
+    SAVE_RESULTS_TO = out_dir + "1d_compare_out.pkl"
 
 #SJNN = os.environ.get("SLURM_JOB_NUM_NODES")
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
@@ -43,8 +43,8 @@ match RUN_LEVEL:
         NP_FITR = 10000
         NFITR = 10
         NREPS_FITR = 20
-        NP_EVAL = 10000
-        NREPS_EVAL = 24
+        NP_EVAL = 10000 # Not using
+        NREPS_EVAL = 24 # Not using
         print("Running at level 3")
 RW_SD = 0.02
 RW_SD_INIT = 0.1
@@ -144,10 +144,7 @@ def runif_design(box, n_draws):
 
     return draw_frame
 
-#initial_params_df = runif_design(sp500_box, NREPS_FITR)
-N_STARTS = 20
-initial_params_df = runif_design(sp500_box, N_STARTS)
-
+initial_params_df = runif_design(sp500_box, NREPS_FITR)
 initial_params_df.to_csv("initial_params.csv", index = False)
 print("Saved 20 initial parameter sets to py csv")
 
@@ -156,7 +153,7 @@ print("Saved 20 initial parameter sets to py csv")
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
 fit_out = []
-pf_out = []
+#pf_out = []
 for rep in range(NREPS_FITR):
     fit_out_rep = []
 
@@ -181,7 +178,7 @@ for rep in range(NREPS_FITR):
     loglik_trace = [-ll for ll in fit_result[0]]  # Convert negative LL to positive LL
     fit_out_rep.append(loglik_trace)
     fit_out.append(fit_out_rep)
-
+    """
     model_for_pfilter = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -200,16 +197,16 @@ for rep in range(NREPS_FITR):
             key = subkey
         ))
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
-
+    """
 pd.DataFrame(fit_out).to_csv("if2_ll_python.csv", index = False)
 print("Saved IF2 LL traces to csv")
 
 
 results_out = {
     "fit_out": fit_out,
-    "pf_out": pf_out,
+    #"pf_out": pf_out,
 }
 end_time = datetime.datetime.now()
 print(end_time - start_time)
-print(pf_out)
+#print(pf_out)
 pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
