@@ -147,7 +147,7 @@ sp500_box <- rbind(
   rho = c(-7.29e-1, -7.29e-1),
   V_0 = c((7.86e-3)**2, (7.86e-3)**2),
 )
-"""
+
 sp500_box <- rbind(
   mu = c(1e-6, 1e-4), 
   theta = c(0.000075, 0.0002),
@@ -165,15 +165,20 @@ global_starts <- pomp::runif_design(
 
 # Feller's Condition
 global_starts$xi <- runif(n = nrow(global_starts), min = 0, max = sqrt(global_starts$kappa * global_starts$theta *2)) #kappa<2*xi*theta
-
+"""
 
 initial_params <- read.csv("initial_params.csv")
 
 # Ensure same number of replicates
 sp500_Nreps_global <- nrow(initial_params)
 
+
+colnames(initial_params) <- c("mu", "kappa", "theta", "xi", "rho", "V_0")
+initial_params$V_0 <- exp(initial_params$V_0)
+
 # Each iteration starts with different set of initial parameters from global_starts
 # pfilter evaluates LL across replications and logmeanexp calculates average LL with SE
+"""
 stew(file = sprintf("ENTER_FILE_NAME.rds"), {
   t.box <- system.time({
     if.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = c,
@@ -200,3 +205,16 @@ stew(file = sprintf("ENTER_FILE_NAME.rds"), {
     print("Saved IF2 LL traces to R csv")
   })
 })
+"""
+if.box <- foreach(i = 1:nrow(initial_params), .packages = 'pomp', .combine = c) %dopar% {
+  mif2(
+    sp500.filt,
+    Nmif = sp500_Nmif,
+    rw.sd = sp500_rw.sd,
+    cooling.fraction.50 = sp500_cooling.fraction50,
+    Np = sp500_Np,
+    params = unlist(initial_params[i, ])
+  )
+}
+
+saveRDS(if.box, "if2_results.rds")
