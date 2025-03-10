@@ -29,15 +29,15 @@ match RUN_LEVEL:
         NP_FITR = 2
         NFITR = 2
         NREPS_FITR = 3
-        NP_EVAL = 2
-        NREPS_EVAL = 5
+        NP_EVAL = 2 # Not using
+        NREPS_EVAL = 5 # Not using
         print("Running at level 1")
     case 2:
         NP_FITR = 1000
         NFITR = 20
         NREPS_FITR = 3
-        NP_EVAL = 1000
-        NREPS_EVAL = 5
+        NP_EVAL = 1000 # Not using
+        NREPS_EVAL = 5 # Not using
         print("Running at level 2")
     case 3:
         NP_FITR = 10000
@@ -69,7 +69,8 @@ sp500_covarnames = ["covaryt"]
 
 def rproc(state, params, key, covars = None):
     V, S, t = state
-    mu, kappa, theta, xi, rho, V_0 = params
+    #mu, kappa, theta, xi, rho, V_0 = params
+    mu, kappa, theta, xi, rho, _ = params
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     kappa = jnp.exp(kappa)
@@ -90,10 +91,12 @@ def rproc(state, params, key, covars = None):
 # Initialization Model
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
-    V_0 = 7.86e-3 ** 2
-    S_0 = 1105
+    #V_0 = 7.86e-3 ** 2
+    #S_0 = 1105
+    V = 7.86e-3 ** 2
+    S = 1105
     t = 0
-    return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
+    return jnp.tile(jnp.array([V, S, t]), (J, 1))
 
 
 # Measurement model: how we measure state
@@ -153,10 +156,10 @@ print("Saved 20 initial parameter sets to py csv")
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
 fit_out = []
+traces = []
 #pf_out = []
 for rep in range(NREPS_FITR):
-    fit_out_rep = []
-
+    key, subkey = random.split(key)  # Ensure different randomness for each rep ???
     sp500_model = pypomp.pomp_class.Pomp(
         rinit = rinit,
         rproc = rproc,
@@ -175,9 +178,10 @@ for rep in range(NREPS_FITR):
         mode = "IF2",
         thresh_mif = 0
     )
-    loglik_trace = [-ll for ll in fit_result[0]]  # Convert negative LL to positive LL
-    fit_out_rep.append(loglik_trace)
-    fit_out.append(fit_out_rep)
+    loglik_trace = fit_result[0].tolist()
+    traces.append({"rep": rep, "loglik_trace": loglik_trace})
+
+    fit_out.append(fit_result)
     """
     model_for_pfilter = pypomp.pomp_class.Pomp(
         rinit = rinit,
@@ -198,9 +202,8 @@ for rep in range(NREPS_FITR):
         ))
     pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
     """
-pd.DataFrame(fit_out).to_csv("if2_ll_python.csv", index = False)
+pd.DataFrame(traces).to_csv("if2_ll_python.csv", index = False)
 print("Saved IF2 LL traces to csv")
-
 
 results_out = {
     "fit_out": fit_out,
