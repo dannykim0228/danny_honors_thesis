@@ -127,7 +127,7 @@ sp500_rw.sd <- rw_sd(
   kappa = sp500_rw.sd_rp,
   xi = sp500_rw.sd_rp,
   rho = sp500_rw.sd_rp,
-  lambda = sp500_rw.sd_rp,
+  #lambda = sp500_rw.sd_rp, # Don't know why this is here
   V_0 = ivp(sp500_rw.sd_ivp)
 )
 
@@ -138,34 +138,32 @@ sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS
 # sp500_Nreps_local <-  switch(run_level,  10,  15,  20,  24) # Not used
 sp500_Nreps_global <- switch(run_level,  3,  15,  20, 20) # Matched with NREPS_FITR
 
-"""
-sp500_box <- rbind(
-  mu = c(3.71e-4, 3.71e-4), 
-  theta = c(1.09e-4, 1.09e-4),
-  kappa = c(3.25e-2, 3.25e-2),
-  xi = c(2.22e-3, 2.22e-3),
-  rho = c(-7.29e-1, -7.29e-1),
-  V_0 = c((7.86e-3)**2, (7.86e-3)**2),
-)
-
-sp500_box <- rbind(
-  mu = c(1e-6, 1e-4), 
-  theta = c(0.000075, 0.0002),
-  kappa = c(1e-8, 0.1),
-  xi = c(1e-8, 1e-2),
-  rho = c(1e-8, 1),
-  V_0 = c((7.86e-3)**2, (7.86e-3)**2),
-)
+# sp500_box <- rbind(
+#   mu = c(3.71e-4, 3.71e-4), 
+#   theta = c(1.09e-4, 1.09e-4),
+#   kappa = c(3.25e-2, 3.25e-2),
+#   xi = c(2.22e-3, 2.22e-3),
+#   rho = c(-7.29e-1, -7.29e-1),
+#   V_0 = c((7.86e-3)**2, (7.86e-3)**2),
+# )
+# 
+# sp500_box <- rbind(
+#   mu = c(1e-6, 1e-4), 
+#   theta = c(0.000075, 0.0002),
+#   kappa = c(1e-8, 0.1),
+#   xi = c(1e-8, 1e-2),
+#   rho = c(1e-8, 1),
+#   V_0 = c((7.86e-3)**2, (7.86e-3)**2),
+# )
 # Generate random initial parameter sets for each global search iteration
-global_starts <- pomp::runif_design(
-  lower = sp500_box[ , 1],
-  upper = sp500_box[ , 2],
-  nseq = sp500_Nreps_global
-)
-
+# global_starts <- pomp::runif_design(
+#   lower = sp500_box[ , 1],
+#   upper = sp500_box[ , 2],
+#   nseq = sp500_Nreps_global
+# )
+# 
 # Feller's Condition
-global_starts$xi <- runif(n = nrow(global_starts), min = 0, max = sqrt(global_starts$kappa * global_starts$theta *2)) #kappa<2*xi*theta
-"""
+# global_starts$xi <- runif(n = nrow(global_starts), min = 0, max = sqrt(global_starts$kappa * global_starts$theta *2)) #kappa<2*xi*theta
 
 initial_params <- read.csv("initial_params.csv")
 
@@ -178,32 +176,32 @@ initial_params$V_0 <- exp(initial_params$V_0)
 
 # Each iteration starts with different set of initial parameters from global_starts
 # pfilter evaluates LL across replications and logmeanexp calculates average LL with SE
-"""
-stew(file = sprintf("ENTER_FILE_NAME.rds"), {
-  t.box <- system.time({
-    if.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = c,
-                      .options.multicore = list(set.seed = TRUE)) %dopar%  {
-                        mif2(
-                          sp500.filt,
-                          Nmif = sp500_Nmif,
-                          rw.sd = sp500_rw.sd,
-                          cooling.fraction.50 = sp500_cooling.fraction50,
-                          Np = sp500_Np,
-                          params = unlist(initial_params[i, ]) # Use fixed initial values
-                        )
-                      } # if.box contains all estimates of parameters (list of mif objects)
-    
-    L.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = rbind,
-                     .options.multicore = list(set.seed = TRUE)) %dopar% {
-                       logmeanexp(
-                         replicate(sp500_Nreps_eval,
-                                   logLik(pfilter(sp500.filt,params = coef(if.box[[i]]), Np = sp500_Np))
-                         ), 
-                         se = TRUE)
-                     } # matrix containing logLik and SE for each time 
-  })
-})
-"""
+
+# stew(file = sprintf("ENTER_FILE_NAME.rds"), {
+#   t.box <- system.time({
+#     if.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = c,
+#                       .options.multicore = list(set.seed = TRUE)) %dopar%  {
+#                         mif2(
+#                           sp500.filt,
+#                           Nmif = sp500_Nmif,
+#                           rw.sd = sp500_rw.sd,
+#                           cooling.fraction.50 = sp500_cooling.fraction50,
+#                           Np = sp500_Np,
+#                           params = unlist(initial_params[i, ]) # Use fixed initial values
+#                         )
+#                       } # if.box contains all estimates of parameters (list of mif objects)
+#     
+#     L.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = rbind,
+#                      .options.multicore = list(set.seed = TRUE)) %dopar% {
+#                        logmeanexp(
+#                          replicate(sp500_Nreps_eval,
+#                                    logLik(pfilter(sp500.filt,params = coef(if.box[[i]]), Np = sp500_Np))
+#                          ), 
+#                          se = TRUE)
+#                      } # matrix containing logLik and SE for each time 
+#   })
+# })
+
 if.box <- foreach(i = 1:nrow(initial_params), .packages = 'pomp', .combine = c) %dopar% {
   mif2(
     sp500.filt,
