@@ -132,11 +132,11 @@ sp500_rw.sd <- rw_sd(
 )
 
 run_level <- 4
-sp500_Np <-           switch(run_level, 100,  200, 500, 10000) # Matched with NP_FITR, NP_EVAL
-sp500_Nmif <-         switch(run_level,  10,  25,  50, 10) # Matched with NFITR
+sp500_Np <-           switch(run_level, 2,  200, 500, 10000) # Matched with NP_FITR, NP_EVAL
+sp500_Nmif <-         switch(run_level,  2,  25,  50, 10) # Matched with NFITR
 sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS_EVAL, Not using
 # sp500_Nreps_local <-  switch(run_level,  10,  15,  20,  24) # Not used
-sp500_Nreps_global <- switch(run_level,  10,  15,  20, 20) # Matched with NREPS_FITR
+sp500_Nreps_global <- switch(run_level,  3,  15,  20, 20) # Matched with NREPS_FITR
 
 """
 sp500_box <- rbind(
@@ -201,8 +201,6 @@ stew(file = sprintf("ENTER_FILE_NAME.rds"), {
                          ), 
                          se = TRUE)
                      } # matrix containing logLik and SE for each time 
-    write.csv(L.box, "if2_ll_r.csv", row.names = FALSE)
-    print("Saved IF2 LL traces to R csv")
   })
 })
 """
@@ -215,6 +213,10 @@ if.box <- foreach(i = 1:nrow(initial_params), .packages = 'pomp', .combine = c) 
     Np = sp500_Np,
     params = unlist(initial_params[i, ])
   )
+
 }
+write.csv(if.box, "if2_ll_r.csv", row.names = FALSE)
+print("Saved all IF2 results in if2_ll_r.csv")
 
 saveRDS(if.box, "if2_results.rds")
+print("Saved IF2 results to if2_results.rds")
