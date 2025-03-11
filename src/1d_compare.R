@@ -11,7 +11,8 @@ registerDoParallel(cores)
 registerDoRNG(34118892)
 
 
-sp500_raw <- read.csv("SPX.csv")  
+sp500_raw <- read.csv("SPX.csv")
+#sp500_raw <- read.csv("C:/Users/ravis/OneDrive/Documents/danny_honors_thesis/data/SPX.csv")
 sp500 <- sp500_raw%>% 
   mutate(date = as.Date(Date)) %>% 
   mutate(diff_days = difftime(date, min(date), units = 'day')) %>% 
@@ -62,27 +63,27 @@ sp500_rmeasure_sim <- "
 "
 
 sp500_dmeasure <- "
-   lik = dnorm(y, mu - 0.5 * V, sqrt(V), give_log); 
+  lik = dnorm(y, mu - 0.5 * V, sqrt(V), give_log); 
 "
 
 
 my_ToTrans <- "
-     T_xi = log(xi);
-     T_kappa = log(kappa);
-     T_theta = log(theta);
-     // T_V_0 = log(V_0);
-     T_mu = log(mu);
-     T_rho = log((rho + 1) / (1 - rho));
+    T_mu = log(mu);
+    T_kappa = log(kappa);
+    T_theta = log(theta);
+    T_xi = log(xi);     
+    T_rho = log((rho + 1) / (1 - rho)); 
+    // T_V_0 = log(V_0);
   "
 
 
 my_FromTrans <- "
+    mu = exp(T_mu);
     kappa = exp(T_kappa);
     theta = exp(T_theta);
     xi = exp(T_xi);
-    // V_0 = exp(T_V_0);
-    mu = exp(T_mu);
     rho = -1 + 2 / (1 + exp(-T_rho));
+    // V_0 = exp(T_V_0);
   "
 
 sp500_partrans <- parameter_trans(
@@ -131,7 +132,7 @@ sp500_rw.sd <- rw_sd(
   V_0 = ivp(sp500_rw.sd_ivp)
 )
 
-run_level <- 4
+run_level <- 1
 sp500_Np <-           switch(run_level, 2,  200, 500, 10000) # Matched with NP_FITR, NP_EVAL
 sp500_Nmif <-         switch(run_level,  2,  25,  50, 10) # Matched with NFITR
 sp500_Nreps_eval <-   switch(run_level,   4,  7,   10,  24) # Matched with NREPS_EVAL, Not using
@@ -167,12 +168,41 @@ sp500_Nreps_global <- switch(run_level,  3,  15,  20, 20) # Matched with NREPS_F
 
 initial_params <- read.csv("initial_params.csv")
 
+
+check_params <- function(params, i) {
+  if (any(is.na(params))) {
+    print(paste("ERROR: NaN detected in parameters for iteration", i))
+    print(params)
+  }
+  if (any(is.infinite(params))) {
+    print(paste("ERROR: Infinite value detected in parameters for iteration", i))
+    print(params)
+  }
+  if (any(params["kappa"] <= 0 | params["theta"] <= 0 | params["xi"] <= 0)) {
+    print(paste("WARNING: kappa, theta, or xi should be positive but got", i))
+    print(params)
+  }
+}
+
+
+print("Checking initial V_0 transformation:")
+print(initial_params$V_0)
 # Ensure same number of replicates
 sp500_Nreps_global <- nrow(initial_params)
 
 
 colnames(initial_params) <- c("mu", "kappa", "theta", "xi", "rho", "V_0")
-initial_params$V_0 <- exp(initial_params$V_0)
+
+if (all(initial_params$V_0 < 0)) {  
+  print("Transforming V_0 from log scale to original scale")
+  initial_params$V_0 <- exp(initial_params$V_0)
+} else {
+  print("Warning: V_0 might already be in the correct scale, no transformation applied.")
+}
+#initial_params$V_0 <- exp(initial_params$V_0)
+
+print("Sample of transformed parameter values:")
+print(head(initial_params))
 
 # Each iteration starts with different set of initial parameters from global_starts
 # pfilter evaluates LL across replications and logmeanexp calculates average LL with SE
@@ -203,13 +233,15 @@ initial_params$V_0 <- exp(initial_params$V_0)
 # })
 
 if.box <- foreach(i = 1:nrow(initial_params), .packages = 'pomp', .combine = c) %dopar% {
+  params <- unlist(initial_params[i, ])
+  check_params(params, i)
   mif2(
     sp500.filt,
     Nmif = sp500_Nmif,
     rw.sd = sp500_rw.sd,
     cooling.fraction.50 = sp500_cooling.fraction50,
     Np = sp500_Np,
-    params = unlist(initial_params[i, ])
+    params = params
   )
 
 }
