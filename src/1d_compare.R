@@ -24,10 +24,10 @@ sp500 <- sp500_raw%>%
 
 sp500_statenames <- c("V", "S")
 sp500_rp_names <- c("mu", "kappa", "theta", "xi", "rho") 
-#sp500_ivp_names <- c("V_0")
-#sp500_parameters <- c(sp500_rp_names, sp500_ivp_names)
-sp500_ivp_names <- c()
-sp500_parameters <- sp500_rp_names
+sp500_ivp_names <- c("V_0")
+sp500_parameters <- c(sp500_rp_names, sp500_ivp_names)
+#sp500_ivp_names <- c()
+#sp500_parameters <- sp500_rp_names
 sp500_covarnames <- "covaryt"
 
 
@@ -36,12 +36,12 @@ rproc1 <- "
   
   rt = covaryt;
   dWs = (rt - mu + 0.5 * V) / (sqrt(V));
-  dZ = rnorm(0, 1); // Generate standard normal noise for the stochastic process
+  dZ = rnorm(0, 1);
   dWv = rho * dWs + sqrt(1 - rho * rho) * dZ;
 
   S += S * (mu + sqrt(fmax(V, 0.0)) * dWs);
   V += kappa * (theta - V) + xi * sqrt(fmax(V, 0.0)) * dWv;
-  // S & V are updated based on this process, ensuring V stays positive
+
   if (V <= 0) {
     V = 1e-32;
   } 
@@ -73,7 +73,7 @@ my_ToTrans <- "
     T_theta = log(theta);
     T_xi = log(xi);     
     T_rho = log((rho + 1) / (1 - rho)); 
-    // T_V_0 = log(V_0);
+    T_V_0 = log(V_0);
   "
 
 
@@ -83,7 +83,7 @@ my_FromTrans <- "
     theta = exp(T_theta);
     xi = exp(T_xi);
     rho = -1 + 2 / (1 + exp(-T_rho));
-    // V_0 = exp(T_V_0);
+    V_0 = exp(T_V_0);
   "
 
 sp500_partrans <- parameter_trans(
@@ -128,7 +128,7 @@ sp500_rw.sd <- rw_sd(
   kappa = sp500_rw.sd_rp,
   xi = sp500_rw.sd_rp,
   rho = sp500_rw.sd_rp,
-  #lambda = sp500_rw.sd_rp, # Don't know why this is here
+  #lambda = sp500_rw.sd_rp,
   V_0 = ivp(sp500_rw.sd_ivp)
 )
 
@@ -185,21 +185,16 @@ check_params <- function(params, i) {
 }
 
 
-print("Checking initial V_0 transformation:")
-print(initial_params$V_0)
 # Ensure same number of replicates
 sp500_Nreps_global <- nrow(initial_params)
-
-
 colnames(initial_params) <- c("mu", "kappa", "theta", "xi", "rho", "V_0")
 
-if (all(initial_params$V_0 < 0)) {  
-  print("Transforming V_0 from log scale to original scale")
-  initial_params$V_0 <- exp(initial_params$V_0)
-} else {
-  print("Warning: V_0 might already be in the correct scale, no transformation applied.")
-}
-#initial_params$V_0 <- exp(initial_params$V_0)
+initial_params$mu <- exp(initial_params$mu)
+initial_params$kappa <- exp(initial_params$kappa)
+initial_params$theta <- exp(initial_params$theta)
+initial_params$xi <- exp(initial_params$xi)
+initial_params$rho <- -1 + 2 / (1 + exp(-initial_params$rho))
+initial_params$V_0 <- exp(initial_params$V_0)
 
 print("Sample of transformed parameter values:")
 print(head(initial_params))
