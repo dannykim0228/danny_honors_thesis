@@ -141,7 +141,7 @@ sp500_rw.sd <- rw_sd(
   kappa = sp500_rw.sd_rp,
   xi = sp500_rw.sd_rp,
   rho = sp500_rw.sd_rp,
-  lambda = sp500_rw.sd_rp,
+  #lambda = sp500_rw.sd_rp, # Don't know why this is here
   V_0 = ivp(sp500_rw.sd_ivp)
 )
 
@@ -175,7 +175,7 @@ global_starts$xi <- runif(n = nrow(global_starts), min = 0, max = sqrt(global_st
 # IF2 with Parallel Processing
 # Each iteration starts with different set of initial parameters from global_starts
 # pfilter evaluates LL across replications and logmeanexp calculates average LL with SE
-stew(file = sprintf("ENTER_FILE_NAME.rds"), {
+stew(file = sprintf("1d_global_search/1d_global_search.rds"), {
   t.box <- system.time({
     if.box <- foreach(i = 1:sp500_Nreps_global, .packages = 'pomp', .combine = c,
                       .options.multicore = list(set.seed = TRUE)) %dopar%  {
@@ -199,7 +199,18 @@ stew(file = sprintf("ENTER_FILE_NAME.rds"), {
                      } # matrix containing logLik and SE for each time 
   })
 })
+"""
+L.box <- foreach(
+			i=1:sp500_Nreps_global, .packages='pomp',
+			.combine=rbind,
+      .options.multicore=list(set.seed=TRUE)
+		) %dopar% {
+			replicate(sp500_Nreps_eval,
+      	logLik(pfilter(sp500.filt, params=coef(if.box[[i]]), Np=sp500_Np))
+      ) |> logmeanexp(se = TRUE)
+    }
 
+"""
 
 mle_params <- c(
   mu = 3.71e-4,
