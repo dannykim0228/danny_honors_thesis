@@ -1,0 +1,220 @@
+---
+title: "General Diagnostics"
+format: html
+jupyter: python3
+engine: knitr
+---
+
+```{python}
+import os
+import pickle
+import numpy as np
+import pandas as pd
+import pypomp
+#import seaborn as sns
+from plotnine import ggplot, geom_line, aes, facet_wrap, coord_cartesian, geom_point
+```
+
+```{r}
+library(tidyverse)
+library(pomp)
+setwd(paste0(here::here(), "/notebook"))
+```
+
+```{python}
+def funky_transform(lst):
+    """Transform rho to perturbation scale"""
+    out = [np.log((1 + x)/(1 - x)) for x in lst]
+    return out
+```
+
+```{python}
+PKL_PATH = "../output/1d_global/search_13/1d_global_out.pkl"
+pkl_in = pickle.load(open(PKL_PATH, "rb"))
+```
+
+# Notes about pkl structure
+
+- Dictionary with two entries
+    - fit_out: A list containing output of the fitting step. Each entry is a replicate from the fitting step.
+        - Various entries: A tuple of length 2 containing information for a replicate.
+            - Entry 0: A JAX array containing the iterated filtering estimate of the log likelihood for each iteration (plus an extra? check when the extra is added)
+            - Entry 1: A JAX array containing parameters from particles. First dimension varies iteration, second varies the particle, and the third varies the parameter.
+    - pf_out: A list containing the output of the particle filtering step. 
+        - Various entries: A list for a different replicate from the particle filtering step.
+            - Entry 0: A numpy.float32 representing the estimated log likelihood.
+            - Entry 1: A numpy.float32 representing the estimated standard deviation of the LL estimate.
+
+```{python}
+LL_frame = pd.DataFrame({
+    "LL": [x[0] for x in pkl_in["pf_out"]],
+    "sd": [x[1] for x in pkl_in["pf_out"]]
+}).sort_values(by = "LL")
+LL_frame.reset_index().to_csv("notebook/LL_frame.csv", index = False)
+```
+
+# Traces
+
+## Process results
+
+```{python}
+traces = pd.DataFrame()
+for rep in range(len(pkl_in["fit_out"])):
+    for iter in range(pkl_in["fit_out"][rep][1].shape[0]):
+        for param in range(pkl_in["fit_out"][rep][1].shape[2]):
+            param_avg = float(np.mean(pkl_in["fit_out"][rep][1][iter,:,param]))
+            traces = pd.concat([
+                traces, 
+                pd.DataFrame({
+                    "rep":str(rep), 
+                    "iter":iter, 
+                    "param_index": param,
+                    "param_value":param_avg
+                }, index = [0])
+            ], ignore_index = True)
+
+for rep in range(len(pkl_in["fit_out"])):
+    for iter in range(pkl_in["fit_out"][rep][0].size):
+        traces = pd.concat([
+                traces, 
+                pd.DataFrame({
+                    "rep":str(rep), 
+                    "iter":iter, 
+                    "param_index": -1,
+                    "param_value":-float(pkl_in["fit_out"][rep][0][iter])
+                }, index = [0])
+            ], ignore_index = True)
+traces
+traces.to_csv("traces.csv", index=False)
+```
+
+```{r}
+traces <- read.csv("traces.csv")
+LL_frame = read.csv("LL_frame.csv")
+best_rep = LL_frame$index[[1]]
+traces <- traces |>
+    mutate(quantity = case_when(
+        param_index == -1 ~ "logLik",
+        param_index == 0 ~ "mu",
+        param_index == 1 ~ "kappa",
+        param_index == 2 ~ "theta",
+        param_index == 3 ~ "xi",
+        param_index == 4 ~ "rho",
+        param_index == 5 ~ "V_0",
+        TRUE ~ as.character(param_index)
+    ))
+```
+
+## Plot traces
+
+```{r}
+# Median parameter estimates
+traces |>
+    group_by(param_index, quantity) |>
+    filter(iter == max(iter)) |>
+    summarise(
+        median_param_value = median(param_value), 
+        sd_param_value = sd(param_value)
+    )
+
+# Parameter estiamtes for the best fit
+traces |>
+    filter(iter == max(iter), rep == best_rep)
+```
+
+```{r}
+ggplot(
+    filter(traces, quantity != "logLik"), 
+    aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
+) + 
+    geom_line() + 
+    facet_wrap(vars(quantity), scales = "free")
+```
+
+```{r}
+ggplot(
+    filter(traces, quantity == "logLik"), 
+    aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
+) + 
+    geom_line() + 
+    facet_wrap(vars(quantity), scales = "free") + 
+    coord_cartesian(ylim = c(11000, 11850))
+```
+
+# R estimates
+
+```{r}
+load("../data/1d_global_search.rda")
+LL_df_R = as.data.frame(L.box)
+traces_long = lapply(seq_along(if.box), function(x){
+  tr = traces(if.box[[x]])
+  tr_long = tr |>
+    as.data.frame() |>
+    mutate(iter = 1:nrow(tr), rep = x) |>
+    pivot_longer(
+      names_to = "quantity", values_to = "param_value", cols = c(-iter, -rep)
+    )
+}) |> 
+    bind_rows() |>
+    mutate(language = "R") |>
+    mutate(value_T = case_when(
+    quantity == "logLik" ~ param_value,
+    quantity == "mu" ~ log(param_value),
+    quantity == "kappa" ~ log(param_value),
+    quantity == "theta" ~ log(param_value),
+    quantity == "xi" ~ log(param_value),
+    quantity == "rho" ~ log((1 + param_value)/(1 - param_value)),
+    quantity == "V_0" ~ log(param_value)
+  ))
+
+traces_pyr = bind_rows(
+    traces |> mutate(language = "python", value_T = param_value),
+    traces_long
+)
+```
+
+```{r}
+ggplot(
+    filter(traces_pyr, quantity != "logLik"), 
+    aes(x = iter, y = value_T, group = interaction(rep, language), color = as.factor(language))
+) + 
+    geom_line() + 
+    facet_wrap(vars(quantity), scales = "free")
+
+traces_pyr |>
+    group_by(language) |>
+    filter(iter == max(iter)) |>
+    ggplot(mapping = aes(x = language, y = value_T, color = language)) +
+    geom_jitter() +
+    facet_wrap(vars(quantity), scales = "free") +
+    labs(
+        title = "Comparison of Final Iteration Values for Each Parameter",
+        x = "Parameter",
+        y = "Transformed Value",
+        fill = "Language"
+    ) +
+    theme_minimal()
+```
+
+# Weizhe's estimates
+
+```{python}
+# Weizhe values
+data = {
+    "Parameter": ["mu", "kappa", "theta", "xi", "rho", "v0"],
+    "Value": [
+        np.log(3.68e-4),
+        np.log(3.14e-2),
+        np.log(1.12e-4),
+        np.log(2.27e-3),
+        funky_transform([-7.38e-1])[0],
+        np.log(7.66e-3**2)
+    ]
+}
+df = pd.DataFrame(data)
+print(df)
+# Exact is 11847.12 from profiling in Weizhe's thesis
+
+# Evaluating the Weizhe model with the Weizhe parameters under 
+# output/1d_global/weizhe_eval yielded LL 11849.65, sd 1.1217372.
+```
