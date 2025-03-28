@@ -7,6 +7,9 @@ scratch.ipynb
 **.DS_Store
 output/default_output/*
 *.out
+.vscode
+notebook/general_diagnostics.html
+notebook/general_diagnostics_files
 
 #### the following is the default Python package gitignore from GitHub ####
 
