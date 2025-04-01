@@ -1,11 +1,15 @@
 ---
 title: "1D global search"
-format: html
-jupyter: python3
+format:
+  html:
+    toc: true
+    code-fold: true
 engine: knitr
 ---
 
 # Goal of this file
+
+Write the goal of this file here. What makes this fit different from previous ones?
 
 # Weizhe's 1d_global_search.R code
 
@@ -28,6 +32,8 @@ run_level <-  as.numeric(Sys.getenv('run_level', unset=1))
 out_dir <-  as.character(Sys.getenv('out_dir', unset="output/default_output/"))
 absolute_out_dir = file.path(here::here(), out_dir)
 
+MAIN_SEED = 631409
+set.seed(MAIN_SEED)
 if(is.na(cores)) cores <- 2 # detectCores()  
 registerDoParallel(cores)
 registerDoRNG(34118892)
@@ -104,7 +110,6 @@ sp500_rinit <- "
   S = 1105; // 1105 is the starting price
 "
 
-
 # rmeasure ----------------------------------------------------------------
 
 sp500_rmeasure_filt <- "
@@ -145,7 +150,6 @@ sp500_partrans <- parameter_trans(
   toEst = Csnippet(my_ToTrans),
   fromEst = Csnippet(my_FromTrans)
 )
-
 
 # Construct Filter Object -------------------------------------------------
 
@@ -196,7 +200,7 @@ global_starts$xi <- runif(
 ```
 
 ```{r Fit the model}
-stew(file = "1d_global_search.rda", dir = absolute_out_dir,{
+results_out = bake(file = "1d_global_search.rds", dir = absolute_out_dir,{
 	t.box <- system.time({
 		if.box <- foreach(
 			i=1:sp500_Nreps_global,.packages='pomp',
@@ -222,6 +226,7 @@ stew(file = "1d_global_search.rda", dir = absolute_out_dir,{
       ) |> logmeanexp(se = TRUE)
     } # matrix containing logLik and SE for each time 
   })
+  list(time = t.box, mif_results = if.box, LL_results = L.box)
 })
 ```
 
@@ -251,10 +256,8 @@ SAVE_RESULTS_TO = os.path.join(r.absolute_out_dir, "1d_global_search.pkl")
 
 #SJNN = os.environ.get("SLURM_JOB_NUM_NODES")
 #SGON = os.environ.get("SLURM_GPUS_ON_NODE")
-MAIN_SEED = 631409
+MAIN_SEED = int(r.MAIN_SEED)
 np.random.seed(MAIN_SEED)
-
-print(f"Running at level {r.run_level}")
 
 NP_FITR = int(r.sp500_Np)
 NFITR = int(r.sp500_Nmif)
@@ -265,6 +268,19 @@ NREPS_EVAL = int(r.sp500_Nreps_eval)
 RW_SD = r.sp500_rw_sd_rp
 RW_SD_INIT = 0
 COOLING_RATE = pow(r.sp500_cooling_fraction50, 1/50)
+
+print(f"""
+Python algorithmic parameters:
+Running at level {int(r.run_level)}
+NP_FITR: {NP_FITR}
+NFITR: {NFITR}
+NREPS_FITR: {NREPS_FITR}
+NP_EVAL: {NP_EVAL}
+NREPS_EVAL: {NREPS_EVAL}
+RW_SD: {RW_SD}
+RW_SD_INIT: {RW_SD_INIT}
+COOLING_RATE: {COOLING_RATE}
+""")
 ```
 
 ```{python Specify the model and data}
@@ -433,3 +449,197 @@ pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
 
 ```
 
+# Basic analysis
+
+## Python LL results
+```{python Make basic frame}
+LL_frame = pd.DataFrame({
+    "LL": [x[0] for x in results_out["pf_out"]],
+    "sd": [x[1] for x in results_out["pf_out"]]
+}).sort_values(by = "LL").reset_index()
+print(LL_frame)
+```
+
+```{python Make traces frame}
+traces = pd.DataFrame()
+for rep in range(len(results_out["fit_out"])):
+  for iter in range(results_out["fit_out"][rep][1].shape[0]):
+    for param in range(results_out["fit_out"][rep][1].shape[2]):
+      param_avg = float(np.mean(results_out["fit_out"][rep][1][iter,:,param]))
+      traces = pd.concat([
+        traces, 
+        pd.DataFrame({
+          "rep":str(rep), 
+          "iter":iter, 
+          "param_index": param,
+          "param_value":param_avg
+        }, index = [0])
+      ], ignore_index = True)
+
+for rep in range(len(results_out["fit_out"])):
+  for iter in range(results_out["fit_out"][rep][0].size):
+    traces = pd.concat([
+      traces, 
+      pd.DataFrame({
+        "rep":str(rep), 
+        "iter":iter, 
+        "param_index": -1,
+        "param_value":-float(results_out["fit_out"][rep][0][iter])
+      }, index = [0])
+    ], ignore_index = True)
+```
+
+```{r Make traces frame in R}
+traces <- py$traces
+LL_frame = py$LL_frame
+best_rep = LL_frame$index[[1]]
+traces <- traces |>
+  mutate(
+    quantity = case_when(
+      param_index == -1 ~ "logLik",
+      param_index == 0 ~ "mu",
+      param_index == 1 ~ "kappa",
+      param_index == 2 ~ "theta",
+      param_index == 3 ~ "xi",
+      param_index == 4 ~ "rho",
+      param_index == 5 ~ "V_0",
+      TRUE ~ as.character(param_index)
+    ),
+    rep = as.numeric(rep)
+  )
+```
+
+### Plot traces
+
+```{r Display median parameter estimates}
+# Median parameter estimates
+traces |>
+    group_by(param_index, quantity) |>
+    filter(iter == max(iter)) |>
+    summarise(
+        median_param_value = median(param_value), 
+        sd_param_value = sd(param_value)
+    )
+
+# Parameter estimates for the best fit
+traces |>
+    filter(iter == max(iter), rep == best_rep)
+```
+
+```{r Plot traces}
+ggplot(
+    filter(traces, quantity != "logLik"), 
+    aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
+) + 
+    geom_line() + 
+    facet_wrap(vars(quantity), scales = "free")
+```
+
+```{r Plot LL traces}
+ggplot(
+    filter(traces, quantity == "logLik"), 
+    aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
+) + 
+    geom_line() + 
+    facet_wrap(vars(quantity), scales = "free") + 
+    coord_cartesian(ylim = c(11000, 11850))
+```
+
+```{r Load R estimates}
+L.box = results_out$LL_results
+if.box = results_out$mif_results
+LL_df_R = as.data.frame(L.box)
+traces_long = lapply(seq_along(if.box), function(x){
+  tr = traces(if.box[[x]])
+  tr_long = tr |>
+    as.data.frame() |>
+    mutate(iter = 1:nrow(tr), rep = x) |>
+    pivot_longer(
+      names_to = "quantity", values_to = "param_value", cols = c(-iter, -rep)
+    )
+}) |> 
+    bind_rows() |>
+    mutate(quantity = ifelse(quantity == "loglik", "logLik", quantity)) |>
+    mutate(language = "R", iter = iter - 1) |>
+    mutate(value_T = case_when(
+        quantity == "logLik" ~ param_value,
+        quantity == "mu" ~ log(param_value),
+        quantity == "kappa" ~ log(param_value),
+        quantity == "theta" ~ log(param_value),
+        quantity == "xi" ~ log(param_value),
+        quantity == "rho" ~ log((1 + param_value)/(1 - param_value)),
+        quantity == "V_0" ~ log(param_value)
+    ))
+
+traces_pyr = bind_rows(
+    traces |> mutate(language = "python", value_T = param_value),
+    traces_long
+)
+```
+
+## Compare python and R traces
+
+```{r Compare python and R traces}
+traces_pyr |>
+    filter(quantity != "logLik") |>
+    #filter(value_T >= -12, value_T <= 12) |>
+ggplot( 
+    mapping = aes(x = iter, y = value_T, group = interaction(rep, language), 
+    color = as.factor(language))
+) + 
+    geom_line(alpha = 0.2) + 
+    facet_wrap(vars(quantity), scales = "free") + 
+    coord_cartesian(ylim = c(-12, 12))
+```
+
+```{r Compare python and R traces quantiles}
+traces_pyr |>
+    filter(quantity != "logLik") |>
+    #filter(value_T >= -12, value_T <= 12) |>
+    group_by(iter, quantity, language) |>
+    summarise(
+        ymin = quantile(value_T, 0.1, na.rm = TRUE),
+        ymax = quantile(value_T, 0.9, na.rm = TRUE),
+        .groups = "drop"
+    ) |>
+ggplot(
+    mapping = aes(x = iter, ymin = ymin, ymax = ymax, fill = language)
+) + 
+    geom_ribbon(alpha = 0.5) + 
+    facet_wrap(vars(quantity), scales = "free") +
+    coord_cartesian(ylim = c(-12, 12))
+```
+
+## Compare python and R estimates
+
+```{r Compare python and R estimates}
+final_estimates = traces_pyr |>
+  group_by(language, quantity) |>
+  filter(
+    (quantity != "logLik" & iter == max(iter)) |
+    (quantity == "logLik" & iter == max(iter) - 1)
+  )
+final_estimates |>
+ggplot(mapping = aes(x = language, y = value_T, color = language), alpha = 0.2) +
+  geom_jitter() +
+  facet_wrap(vars(quantity), scales = "free") +
+  labs(
+      title = "Comparison of Final Iteration Values for Each Parameter (Zoomed)",
+      x = "Parameter",
+      y = "Transformed Value",
+      fill = "Language"
+  )
+
+final_estimates |>
+  group_by(quantity, language) |>
+  summarise(
+    sd = format(sd(value_T), scientific = FALSE),
+    mean = format(mean(value_T), scientific = FALSE),
+    min = format(min(value_T), scientific = FALSE),
+    Q1 = format(quantile(value_T, 0.25, na.rm = TRUE), scientific = FALSE),
+    median = format(median(value_T), scientific = FALSE),
+    Q3 = format(quantile(value_T, 0.75, na.rm = TRUE), scientific = FALSE),
+    max = format(max(value_T), scientific = FALSE)
+  ) |>
+  knitr::kable()
+```
