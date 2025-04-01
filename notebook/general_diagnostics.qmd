@@ -18,17 +18,15 @@ import pickle
 import numpy as np
 import pandas as pd
 import pypomp
-```
 
-```{python}
 def funky_transform(lst):
     """Transform rho to perturbation scale"""
     out = [np.log((1 + x)/(1 - x)) for x in lst]
     return out
 ```
 
-```{python}
-PKL_PATH = "../output/1d_global/search_11/1d_global_out.pkl"
+```{python Load data in python}
+PKL_PATH = "../output/1d_global/search_14/1d_global_out.pkl"
 pkl_in = pickle.load(open(PKL_PATH, "rb"))
 ```
 
@@ -44,7 +42,7 @@ pkl_in = pickle.load(open(PKL_PATH, "rb"))
             - Entry 0: A numpy.float32 representing the estimated log likelihood.
             - Entry 1: A numpy.float32 representing the estimated standard deviation of the LL estimate.
 
-```{python}
+```{python Make basic frame}
 LL_frame = pd.DataFrame({
     "LL": [x[0] for x in pkl_in["pf_out"]],
     "sd": [x[1] for x in pkl_in["pf_out"]]
@@ -56,7 +54,7 @@ print(LL_frame)
 
 ## Process results
 
-```{python}
+```{python Make traces frame}
 traces = pd.DataFrame()
 for rep in range(len(pkl_in["fit_out"])):
     for iter in range(pkl_in["fit_out"][rep][1].shape[0]):
@@ -86,7 +84,7 @@ for rep in range(len(pkl_in["fit_out"])):
 traces
 ```
 
-```{r}
+```{r Make traces frame in R}
 traces <- py$traces
 LL_frame = py$LL_frame
 best_rep = LL_frame$index[[1]]
@@ -108,7 +106,7 @@ traces <- traces |>
 
 ## Plot traces
 
-```{r}
+```{r Display median parameter estimates}
 # Median parameter estimates
 traces |>
     group_by(param_index, quantity) |>
@@ -118,12 +116,12 @@ traces |>
         sd_param_value = sd(param_value)
     )
 
-# Parameter estiamtes for the best fit
+# Parameter estimates for the best fit
 traces |>
     filter(iter == max(iter), rep == best_rep)
 ```
 
-```{r}
+```{r Plot traces}
 ggplot(
     filter(traces, quantity != "logLik"), 
     aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
@@ -132,7 +130,7 @@ ggplot(
     facet_wrap(vars(quantity), scales = "free")
 ```
 
-```{r}
+```{r Plot LL traces}
 ggplot(
     filter(traces, quantity == "logLik"), 
     aes(x = iter, y = param_value, group = rep, color = as.factor(rep))
@@ -144,7 +142,7 @@ ggplot(
 
 # R estimates
 
-```{r}
+```{r Load R estimates}
 load("../data/1d_global_search.rda")
 LL_df_R = as.data.frame(L.box)
 traces_long = lapply(seq_along(if.box), function(x){
@@ -176,7 +174,7 @@ traces_pyr = bind_rows(
 
 ## Compare python and R traces
 
-```{r}
+```{r Compare python and R traces}
 traces_pyr |>
     filter(quantity != "logLik") |>
     filter(value_T >= -12, value_T <= 12) |>
@@ -188,7 +186,7 @@ ggplot(
     facet_wrap(vars(quantity), scales = "free")
 ```
 
-```{r}
+```{r Compare python and R traces quantiles}
 traces_pyr |>
     filter(quantity != "logLik") |>
     filter(value_T >= -12, value_T <= 12) |>
@@ -207,7 +205,7 @@ ggplot(
 
 ## Compare python and R estimates
 
-```{r}
+```{r Compare python and R estimates}
 traces_pyr |>
     group_by(language, quantity) |>
     filter(iter == max(iter)) |>
@@ -236,7 +234,7 @@ ggplot(mapping = aes(x = language, y = value_T, color = language), alpha = 0.2) 
 
 # Weizhe's estimates
 
-```{python}
+```{python Weizhe estimates}
 # Weizhe values
 data = {
     "Parameter": ["mu", "kappa", "theta", "xi", "rho", "v0"],

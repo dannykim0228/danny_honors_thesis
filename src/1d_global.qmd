@@ -1,0 +1,435 @@
+---
+title: "1D global search"
+format: html
+jupyter: python3
+engine: knitr
+---
+
+# Goal of this file
+
+# Weizhe's 1d_global_search.R code
+
+```{r Load packages}
+library(reticulate)
+library(pomp)
+library(mvtnorm)
+library(doParallel)
+library(foreach)
+library(doRNG)
+library(tidyverse)
+sessionInfo()
+getwd()
+use_virtualenv(file.path(here::here(), ".venv"), required = TRUE)
+```
+
+```{r Set cores}
+cores <-  as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+run_level <-  as.numeric(Sys.getenv('run_level', unset=1))
+out_dir <-  as.character(Sys.getenv('out_dir', unset="output/default_output/"))
+absolute_out_dir = file.path(here::here(), out_dir)
+
+if(is.na(cores)) cores <- 2 # detectCores()  
+registerDoParallel(cores)
+registerDoRNG(34118892)
+```
+
+```{r Set algorithmic parameters (R)}
+# This chunk shows up later in Weizhe's code, but moving it here doesn't change
+# anything.
+sp500_rw_sd_rp <- 0.02
+sp500_rw_sd_ivp <- 0.1
+sp500_cooling_fraction50 <- 0.5
+
+sp500_rw.sd <- rw_sd(
+  mu = sp500_rw_sd_rp,
+  theta = sp500_rw_sd_rp,
+  kappa = sp500_rw_sd_rp,
+  xi = sp500_rw_sd_rp,
+  rho = sp500_rw_sd_rp,
+  V_0 = ivp(sp500_rw_sd_ivp)
+)
+
+sp500_Np <-           switch(run_level,   2,  200, 500, 1000)
+sp500_Nmif <-         switch(run_level,   2,  25,  50, 200)
+sp500_Nreps_eval <-   switch(run_level,   2,  7,   10,  24)
+sp500_Nreps_local <-  switch(run_level,   2,  15,  20,  24)
+sp500_Nreps_global <- switch(run_level,   2,  15,  20, 120)
+```
+
+```{r Data manipulation}
+sp500_raw <- read.csv(file.path(here::here(),"data/SPX.csv"))
+sp500 <- sp500_raw %>% 
+  mutate(date = as.Date(Date)) %>% 
+  mutate(diff_days = difftime(date, min(date), units = 'day')) %>% 
+  mutate(time = as.numeric(diff_days)) %>% 
+  mutate(y = log(Close / lag(Close))) %>% 
+  select(time, y) %>% 
+  drop_na()
+```
+
+```{r Names of states and parameters}
+sp500_statenames <- c("V", "S")
+sp500_rp_names <- c("mu", "kappa", "theta", "xi", "rho") 
+sp500_ivp_names <- c("V_0")
+sp500_parameters <- c(sp500_rp_names, sp500_ivp_names)
+sp500_covarnames <- "covaryt"
+
+```
+
+```{r Specify model}
+# rprocess ----------------------------------------------------------------
+
+rproc1 <- "
+  double dWv, dZ, dWs, rt;
+  
+  rt=covaryt;
+  dWs = (rt-mu+0.5*V)/(sqrt(V));
+  dZ = rnorm(0, 1);
+  
+  dWv = rho * dWs + sqrt(1 - rho * rho) * dZ;
+
+  S += S * (mu + sqrt(fmax(V, 0.0)) * dWs);
+  V += kappa*(theta - V) + xi*sqrt(V)*dWv;
+  
+  if (V<=0) {
+    V=1e-32;
+  } 
+"
+
+
+# Initialization Model ----------------------------------------------------
+
+sp500_rinit <- "
+  V = V_0; // V_0 is a parameter as well
+  S = 1105; // 1105 is the starting price
+"
+
+
+# rmeasure ----------------------------------------------------------------
+
+sp500_rmeasure_filt <- "
+  y=exp(covaryt);
+"
+
+sp500_rmeasure_sim <- "
+  y = (mu - 0.5 * V) + sqrt(V); 
+"
+
+# dmeasure ----------------------------------------------------------------
+
+sp500_dmeasure <- "
+   lik=dnorm(y, mu-0.5*V, sqrt(V), give_log); 
+"
+
+# Parameter Transformation ------------------------------------------------
+
+my_ToTrans <- "
+     T_xi = log(xi);
+     T_kappa = log(kappa);
+     T_theta = log(theta);
+     T_V_0 = log(V_0);
+     T_mu = log(mu);
+     T_rho = log((rho + 1) / (1 - rho));
+  "
+
+my_FromTrans <- "
+    kappa = exp(T_kappa);
+    theta = exp(T_theta);
+    xi = exp(T_xi);
+    V_0 = exp(T_V_0);
+    mu = exp(T_mu);
+    rho = -1 + 2 / (1 + exp(-T_rho));
+  "
+
+sp500_partrans <- parameter_trans(
+  toEst = Csnippet(my_ToTrans),
+  fromEst = Csnippet(my_FromTrans)
+)
+
+
+# Construct Filter Object -------------------------------------------------
+
+sp500.filt <- pomp(
+  data=data.frame(
+    y=sp500$y, time=1:length(sp500$y)
+  ),
+  statenames = sp500_statenames,
+  paramnames = sp500_parameters,
+  covarnames = sp500_covarnames,
+  times = "time",
+  t0=0,
+  covar = covariate_table(
+    time=0:length(sp500$y),
+    covaryt=c(0, sp500$y),
+    times = "time"
+  ),
+  rmeasure = Csnippet(sp500_rmeasure_filt),
+  dmeasure = Csnippet(sp500_dmeasure),
+  rprocess = discrete_time(step.fun = Csnippet(rproc1), delta.t = 1),
+  rinit = Csnippet(sp500_rinit),
+  partrans = sp500_partrans
+)
+```
+
+```{r Sample starting parameters (R)}
+sp500_box <- rbind(
+  mu=c(1e-6,1e-4), 
+  theta = c(0.000075,0.0002),
+  kappa =c(1e-8,0.1),
+  xi = c(1e-8,1e-2),
+  rho = c(1e-8,1),
+  V_0=c(1e-10,1e-4)
+)
+
+global_starts <- pomp::runif_design(
+  lower = sp500_box[, 1],
+  upper = sp500_box[, 2],
+  nseq = sp500_Nreps_global
+)
+
+# Feller's Condition
+global_starts$xi <- runif(
+	n=nrow(global_starts), 
+	min=0, 
+	max=sqrt(global_starts$kappa * global_starts$theta *2)
+) #kappa<2*xi*theta
+```
+
+```{r Fit the model}
+stew(file = "1d_global_search.rda", dir = absolute_out_dir,{
+	t.box <- system.time({
+		if.box <- foreach(
+			i=1:sp500_Nreps_global,.packages='pomp',
+			.combine=c,
+      .options.multicore=list(set.seed=TRUE)
+		) %dopar% {
+      mif2(
+      	sp500.filt,
+        Nmif = sp500_Nmif,
+        rw.sd = sp500_rw.sd,
+        cooling.fraction.50 = sp500_cooling_fraction50,
+        Np = sp500_Np,
+        params=unlist(global_starts[i, ])
+      )
+    } # if.box contains all estimates of parameters (list of mif objects)
+    L.box <- foreach(
+			i=1:sp500_Nreps_global,.packages='pomp',
+			.combine=rbind,
+      .options.multicore=list(set.seed=TRUE)
+		) %dopar% {
+			replicate(sp500_Nreps_eval,
+      	logLik(pfilter(sp500.filt,params=coef(if.box[[i]]),Np=sp500_Np))
+      ) |> logmeanexp(se = TRUE)
+    } # matrix containing logLik and SE for each time 
+  })
+})
+```
+
+
+# pypomp implementation of Weizhe's 1d_global_search.R code
+
+```{python Import packages}
+import os
+import pickle
+import datetime
+import jax
+import jax.numpy as jnp
+from jax import random
+import pandas as pd
+import numpy as np
+import pypomp
+import pypomp.fit
+import pypomp.pfilter
+import pypomp.pomp_class
+```
+
+```{python Set algorithmic parameters (python)}
+print("Current system time:", datetime.datetime.now())
+print("Working directory:", os.getcwd())
+
+SAVE_RESULTS_TO = os.path.join(r.absolute_out_dir, "1d_global_search.pkl")
+
+#SJNN = os.environ.get("SLURM_JOB_NUM_NODES")
+#SGON = os.environ.get("SLURM_GPUS_ON_NODE")
+MAIN_SEED = 631409
+np.random.seed(MAIN_SEED)
+
+print(f"Running at level {r.run_level}")
+
+NP_FITR = int(r.sp500_Np)
+NFITR = int(r.sp500_Nmif)
+NREPS_FITR = int(r.sp500_Nreps_global)
+NP_EVAL = int(r.sp500_Np)
+NREPS_EVAL = int(r.sp500_Nreps_eval)
+
+RW_SD = r.sp500_rw_sd_rp
+RW_SD_INIT = 0
+COOLING_RATE = pow(r.sp500_cooling_fraction50, 1/50)
+```
+
+```{python Specify the model and data}
+# Data Manipulation
+sp500 = r.sp500
+
+# Name of States and Parmeters
+sp500_statenames = ["V", "S"]
+sp500_rp_names = ["mu", "kappa", "theta", "xi", "rho"]
+sp500_ivp_names = ["V_0"]
+sp500_parameters = sp500_rp_names + sp500_ivp_names
+sp500_covarnames = ["covaryt"]
+
+def rproc(state, params, key, covars = None):
+    """Process simulator for Weizhe model."""
+    V, S, t = state
+    mu, kappa, theta, xi, rho, V_0 = params
+    # Transform parameters onto natural scale
+    mu = jnp.exp(mu)
+    kappa = jnp.exp(kappa)
+    theta = jnp.exp(theta)
+    xi = jnp.exp(xi)
+    rho = -1 + 2/(1 + jnp.exp(-rho))
+    # Make sure t is cast as an int
+    t = t.astype(int)
+    # Wiener process generation (Gaussian noise)
+    dZ = random.normal(key)
+    dWs = (covars[t] - mu + 0.5 * V) / jnp.sqrt(V)
+    # dWv with correlation
+    dWv = rho * dWs + jnp.sqrt(1 - rho ** 2) * dZ
+    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
+    V = V + kappa*(theta - V) + xi * jnp.sqrt(V) * dWv
+    t += 1
+    # Feller condition to keep V positive
+    V = jnp.maximum(V, 1e-32)
+    # Results must be returned as a JAX array
+    return jnp.array([V, S, t])
+
+# Initialization Model
+def rinit(params, J, covars = None):
+    """Initial state process simulator for Weizhe model."""
+    # Transform V_0 onto natural scale
+    V_0 = jnp.exp(params[5])
+    S_0 = 1105  # Initial price
+    t = 0
+    # Result must be returned as a JAX array. For rinit, the states must be replicated
+    # for each particle. 
+    return jnp.tile(jnp.array([V_0, S_0, t]), (J,1))
+
+# Measurement model: how we measure state
+def dmeasure(y, state, params):
+    """Measurement model distribution for Weizhe model."""
+    V, S, t = state
+    # Transform mu onto the natural scale
+    mu = jnp.exp(params[0])
+    return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
+```
+
+```{python Sample starting parameters (python)}
+def funky_transform(lst):
+    """Transform rho to perturbation scale"""
+    out = [np.log((1 + x)/(1 - x)) for x in lst]
+    return out
+
+
+# sp500_box = pd.DataFrame({
+#     # Parameters are transformed onto the perturbation scale
+#     "mu": [1e-6, 1e-4],
+#     "kappa": [1e-8, 0.1],
+#     "theta": [0.000075, 0.0002],
+#     "xi": [1e-8, 1e-2],
+#     "rho": [-0.9, 0.9],
+#     "V_0": [1e-6, 1e-4]
+# })
+
+# def runif_design(box, n_draws):
+#     """Draws parameters from a given box."""
+#     draw_frame = pd.DataFrame()
+#     for param in box.columns:
+#         draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
+#     draw_frame["mu"] = np.log(draw_frame["mu"])
+#     draw_frame["kappa"] = np.log(draw_frame["kappa"])
+#     draw_frame["theta"] = np.log(draw_frame["theta"])
+#     draw_frame["xi"] = np.log(draw_frame["xi"])
+#     draw_frame["rho"] = funky_transform(draw_frame["rho"])
+#     draw_frame["V_0"] = np.log(draw_frame["V_0"])
+#     return draw_frame
+
+# initial_params_df = runif_design(sp500_box, NREPS_FITR)
+
+
+initial_params_df = r.global_starts.assign(
+    mu = np.log(r.global_starts["mu"]),
+    kappa = np.log(r.global_starts["kappa"]),
+    theta = np.log(r.global_starts["theta"]),
+    xi = np.log(r.global_starts["xi"]),
+    rho = funky_transform(r.global_starts["rho"]),
+    V_0 = np.log(r.global_starts["V_0"])
+)[["mu", "kappa", "theta", "xi", "rho", "V_0"]]
+```
+
+```{python Fit the POMP model, eval = TRUE}
+start_time = datetime.datetime.now()
+key = random.key(MAIN_SEED)
+fit_out = []
+pf_out = []
+for rep in range(NREPS_FITR):
+    # Apparently the theta argument for pypomp.fit doesn't override whatever is
+    # already saved in the model object, so we need to remake the model object each rep.
+    sp500_model = pypomp.pomp_class.Pomp(
+        rinit = rinit,
+        rproc = rproc,
+        dmeas = dmeasure,
+        # Observed log returns
+        ys = jnp.array(sp500['y'].values),
+        # Initial parameters
+        theta = jnp.array(initial_params_df.iloc[rep]),
+        # Covariates(time)
+        covars = jnp.insert(sp500['y'].values, 0, 0)
+    )
+
+    fit_out.append(pypomp.fit.fit(
+        pomp_object = sp500_model,
+        #theta = jnp.array(initial_params_df.iloc[rep]),
+        J = NP_FITR,
+        M = NFITR,
+        a = COOLING_RATE,
+        sigmas = RW_SD,
+        sigmas_init = RW_SD_INIT,
+        mode = "IF2",
+        thresh_mif = 0
+    ))
+
+    # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
+    # already saved in the model object, so we need to remake the model object.
+    model_for_pfilter = pypomp.pomp_class.Pomp(
+        rinit = rinit,
+        rproc = rproc,
+        dmeas = dmeasure,
+        # Observed log returns
+        ys = jnp.array(sp500['y'].values),
+        # Initial parameters
+        theta = fit_out[rep][1][-1].mean(axis = 0),
+        # Covariates(time)
+        covars = jnp.insert(sp500['y'].values, 0, 0)
+    )
+    pf_out2 = []
+    for pf_rep in range(NREPS_EVAL):
+        # JAX seed needs to be changed manually
+        key, subkey = random.split(key = key)
+        pf_out2.append(pypomp.pfilter.pfilter(
+            pomp_object = model_for_pfilter,
+            J = NP_EVAL,
+            thresh = 0,
+            key = subkey
+        ))
+    pf_out.append([np.mean(pf_out2), np.std(pf_out2)])
+results_out = {
+    "fit_out": fit_out,
+    "pf_out": pf_out,
+}
+end_time = datetime.datetime.now()
+print(end_time - start_time) # run time
+print(pf_out) # Print LL estimates
+pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
+
+```
+
