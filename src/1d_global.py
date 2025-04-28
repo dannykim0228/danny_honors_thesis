@@ -11,7 +11,7 @@ import pypomp
 import pypomp.fit
 import pypomp.pfilter
 import pypomp.pomp_class
-
+#jax.config.update("jax_disable_jit", False)
 print("Current system time:", datetime.datetime.now())
 
 out_dir = os.environ.get("out_dir")
@@ -29,8 +29,8 @@ RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
-        NFITR = 2
-        NREPS_FITR = 3
+        NFITR = 1
+        NREPS_FITR = 1
         NP_EVAL = 2
         NREPS_EVAL = 5
         print("Running at level 1")
@@ -43,13 +43,13 @@ match RUN_LEVEL:
         print("Running at level 2")
     case 3:
         NP_FITR = 1000
-        NFITR = 100
-        NREPS_FITR = 20
+        NFITR = 200
+        NREPS_FITR = 1 #20
         NP_EVAL = 5000
         NREPS_EVAL = 20
         print("Running at level 3")
-RW_SD = 0.02
-RW_SD_INIT = 0.1
+RW_SD = np.array([0.02, 0.02, 0.02, 0.02, 0.02, 0])
+RW_SD_INIT = np.array([0.02, 0.02, 0.02, 0.02, 0.02, 0.1])
 COOLING_RATE = 0.987
 
 # Data Manipulation
@@ -142,6 +142,13 @@ def runif_design(box, n_draws):
 
 initial_params_df = runif_design(sp500_box, NREPS_FITR)
 
+# Implement Feller's condition
+initial_params_df["xi"] = np.random.uniform(
+    size=len(initial_params_df),
+    low=0,
+    high=np.sqrt(initial_params_df["kappa"]*initial_params_df["theta"]*2)
+)
+
 # Fit POMP model
 start_time = datetime.datetime.now()
 key = random.key(MAIN_SEED)
@@ -162,6 +169,7 @@ for rep in range(NREPS_FITR):
         covars = jnp.insert(sp500['y'].values, 0, 0)
     )
 
+    key, subkey = random.split(key)
     fit_out.append(pypomp.fit.fit(
         pomp_object = sp500_model,
         #theta = jnp.array(initial_params_df.iloc[rep]),
@@ -171,7 +179,8 @@ for rep in range(NREPS_FITR):
         sigmas = RW_SD,
         sigmas_init = RW_SD_INIT,
         mode = "IF2",
-        thresh_mif = 0
+        thresh_mif = 0,
+        key = subkey
     ))
 
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is

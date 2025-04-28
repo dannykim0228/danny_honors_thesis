@@ -1,8 +1,10 @@
 
 *~
 
+scratch
 scratch.py
 scratch.ipynb
+scratch.R
 **.pkl
 **.DS_Store
 output/default_output/*
