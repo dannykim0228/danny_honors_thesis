@@ -7,10 +7,7 @@ import jax.numpy as jnp
 from jax import random
 import pandas as pd
 import numpy as np
-import pypomp
-import pypomp.fit
-import pypomp.pfilter
-import pypomp.pomp_class
+import pypomp as po
 #jax.config.update("jax_disable_jit", False)
 print("Current system time:", datetime.datetime.now())
 
@@ -25,14 +22,14 @@ else:
 MAIN_SEED = 631409
 np.random.seed(MAIN_SEED)
 
-RUN_LEVEL = 3
+RUN_LEVEL = 1
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2
-        NFITR = 1
-        NREPS_FITR = 1
+        NFITR = 2
+        NREPS_FITR = 2
         NP_EVAL = 2
-        NREPS_EVAL = 5
+        NREPS_EVAL = 2
         print("Running at level 1")
     case 2:
         NP_FITR = 1000
@@ -146,7 +143,11 @@ initial_params_df = runif_design(sp500_box, NREPS_FITR)
 initial_params_df["xi"] = np.random.uniform(
     size=len(initial_params_df),
     low=0,
-    high=np.sqrt(initial_params_df["kappa"]*initial_params_df["theta"]*2)
+    high=np.log(np.sqrt(
+        np.exp(initial_params_df["kappa"])
+        *np.exp(initial_params_df["theta"])
+        *2
+    ))
 )
 
 # Fit POMP model
@@ -157,7 +158,7 @@ pf_out = []
 for rep in range(NREPS_FITR):
     # Apparently the theta argument for pypomp.fit doesn't override whatever is
     # already saved in the model object, so we need to remake the model object each rep.
-    sp500_model = pypomp.pomp_class.Pomp(
+    sp500_model = po.Pomp(
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
@@ -170,7 +171,7 @@ for rep in range(NREPS_FITR):
     )
 
     key, subkey = random.split(key)
-    fit_out.append(pypomp.fit.fit(
+    fit_out.append(po.fit(
         pomp_object = sp500_model,
         #theta = jnp.array(initial_params_df.iloc[rep]),
         J = NP_FITR,
@@ -185,7 +186,7 @@ for rep in range(NREPS_FITR):
 
     # Apparently the theta argument for pypomp.pfilter doesn't override whatever is
     # already saved in the model object, so we need to remake the model object.
-    model_for_pfilter = pypomp.pomp_class.Pomp(
+    model_for_pfilter = po.Pomp(
         rinit = rinit,
         rproc = rproc,
         dmeas = dmeasure,
@@ -200,7 +201,7 @@ for rep in range(NREPS_FITR):
     for pf_rep in range(NREPS_EVAL):
         # JAX seed needs to be changed manually
         key, subkey = random.split(key = key)
-        pf_out2.append(pypomp.pfilter.pfilter(
+        pf_out2.append(po.pfilter(
             pomp_object = model_for_pfilter,
             J = NP_EVAL,
             thresh = 0,
