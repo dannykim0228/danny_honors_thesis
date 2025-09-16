@@ -27,3 +27,14 @@ Detailed, platform-specific instructions and notes are below.
 - Python 3.10+ recommended
 - Packages:
   - jax, jaxlib, pypomp (tutorials & install guidance: https://github.com/pypomp/tutorials.git)
+
+### Notes about 1d_global_if2_out.pkl structure:
+- Dictionary with two entries
+    - fit_out: A list containing output of the fitting step. Each entry is a replicate from the fitting step.
+        - Various entries: A tuple of length 2 containing information for a replicate.
+            - Entry 0: A JAX array containing the iterated filtering estimate of the log likelihood for each iteration (plus an extra? check when the extra is added)
+            - Entry 1: A JAX array containing parameters from particles. First dimension varies iteration, second varies the particle, and the third varies the parameter.
+    - pf_out: A list containing the output of the particle filtering step. 
+        - Various entries: A list for a different replicate from the particle filtering step.
+            - Entry 0: A numpy.float32 representing the estimated log likelihood.
+            - Entry 1: A numpy.float32 representing the estimated standard deviation of the LL estimate.
