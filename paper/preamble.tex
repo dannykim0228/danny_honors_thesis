@@ -1,0 +1,36 @@
+\usepackage{geometry, graphicx, imakeidx, titlesec, array} % necessary packages
+\usepackage{mathptmx}
+\usepackage{amsmath, amsthm, amssymb, mathrsfs, multirow, verbatim} % supplementary packages
+\usepackage[nobiblatex]{xurl} % enable linebreak of \url command
+\usepackage{indentfirst} % indent first paragraph of sections/subsections
+\usepackage{booktabs} % table tool
+\usepackage{ragged2e}
+\usepackage{setspace}
+\usepackage{natbib}
+% \usepackage{algorithm2e}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% Page layout
+\geometry{letterpaper, left=25mm, right=25mm, top=25mm, bottom=25mm}
+
+% Chapter/section styles
+\titleformat{\chapter}{\normalfont\LARGE\bfseries}{\chaptertitlename\ \thechapter.}{10pt}{\Large}
+
+% Theorem-like environments
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+
+\makeindex % command for making an index chapter
+\linespread{1.5} % set the vertical spacing between successive lines (the ratio of the maximal height of a normal font and the base lineskip)
+\renewcommand\arraystretch{1.3} % increase vertical spacing by 30%
+
+% kill automatic title even if YAML fields are accidentally nonempty
+\AtBeginDocument{\let\maketitle\relax}
+
+% PDF metadata because of blanked YAML title/author/date
+\usepackage{hyperref}
+\hypersetup{
+  pdftitle={Testing a Modern Inference Framework for POMP Models: A Case Study Using Stochastic Volatility},
+  pdfauthor={Dae Hyun Kim}
+}
