@@ -27,31 +27,31 @@ RUN_LEVEL = 3
 match RUN_LEVEL:
     case 1:
         NP_FITR = 2 # Number of particles used in IF2
-        NFITR = 2 # Number of IF steps
-        NREPS_FITR = 3 # Number of independent IF2 runs from different starting parameter values
+        NFITR = 2 # Number of IF steps # iter
+        NREPS_FITR = 3 # Number of independent IF2 runs from different starting parameter values # rep
         NP_EVAL = 2 # Number of particles used in pfilter for LL evaluation
         NREPS_EVAL = 5 # Number of pfilter eval to compute LL after IF2
         print("Running at level 1")
     case 2:
-        NP_FITR = 1000
-        NFITR = 20
-        NREPS_FITR = 3
-        NP_EVAL = 1000
-        NREPS_EVAL = 5
+        NP_FITR = 100
+        NFITR = 10
+        NREPS_FITR = 10
+        NP_EVAL = 100
+        NREPS_EVAL = 4
         print("Running at level 2")
     case 3:
-        NP_FITR = 5000 
-        NFITR = 10
-        NREPS_FITR = 20 # Increase to 60
-        NP_EVAL = 5000
-        NREPS_EVAL = 24 # Increased from 20
+        NP_FITR = 1000 
+        NFITR = 200 
+        NREPS_FITR = 120
+        NP_EVAL = 1000
+        NREPS_EVAL = 24
         print("Running at level 3")
 RW_SD = 0.02
 RW_SD_INIT = 0.1
-COOLING_RATE = 0.987
+COOLING_RATE = 0.98623
 
 # Data Manipulation
-sp500_raw = pd.read_csv("/home/kimdanny/danny_honors_thesis/data/SPX.csv")
+sp500_raw = pd.read_csv("SPX.csv")
 sp500 = sp500_raw.copy()
 sp500['date'] = pd.to_datetime(sp500['Date'])
 sp500['diff_days'] = (sp500['date'] - sp500['date'].min()).dt.days
@@ -95,14 +95,12 @@ def rproc(state, params, key, covars = None):
 # Initialization Model
 def rinit(params, J, covars = None):
     # Transform V_0 onto natural scale
-    #V_0 = jnp.exp(params[5])
-    #V_0 = jnp.exp(jnp.clip(params[5], a_min = -10, a_max = 0))
-    V_0 = 7.86e-3 ** 2
-    S_0 = 1105  # Initial price
+    V = jnp.exp(params[5])
+    S = 1105  # Initial price
     t = 0
     # Result must be returned as a JAX array. For rinit, the states must be replicated
     # for each particle
-    return jnp.tile(jnp.array([V_0, S_0, t]), (J, 1))
+    return jnp.tile(jnp.array([V, S, t]), (J, 1))
 
 
 # Measurement model: how we measure state
@@ -113,58 +111,25 @@ def dmeasure(y, state, params):
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
 
+
 def funky_transform(lst):
     """Transform rho to perturbation scale"""
     out = [np.log((1 + x) / (1 - x)) for x in lst]
     return out
 
-sp500_box = pd.DataFrame({
-    # Parameters are transformed onto the perturbation scale
-    "mu": [3.71e-4, 3.71e-4],
-    "kappa": [3.25e-2, 3.25e-2],
-    "theta": [1.09e-4, 1.09e-4],
-    "xi": [2.22e-3, 2.22e-3],
-    "rho": [-7.29e-1, -7.29e-1],
-    "V_0": [(7.86e-3)**2, (7.86e-3)**2]
-})
 
-"""
-sp500_box = pd.DataFrame({
-    # Parameters are transformed onto the perturbation scale
-    "mu": np.log([1e-6, 1e-4]),
-    "kappa": np.log([1e-8, 0.1]),
-    "theta": np.log([0.000075, 0.0002]),
-    "xi": np.log([5e-4, 1e-2]),
-    "rho": funky_transform([0.5, 0.9]),
-    #"rho": funky_transform(np.clip([-0.9, 0.9], -0.95, 0.95))
-    "V_0": np.log([1e-6, 1e-4])
-})
+# Load initial parameters from CSV (in natural scale)
+initial_params_df_nat = pd.read_csv("initial_params_r.csv")
 
-sp500_box = pd.DataFrame({
-    "mu": np.log([3.71e-4, 3.71e-4]),
-    "kappa": np.log([3.25e-2, 3.25e-2]),
-    "theta": np.log([1.09e-4, 1.09e-4]),
-    "xi": np.log([2.22e-3, 2.22e-3]),
-    "rho": funky_transform([-7.29e-1, -7.29e-1]),
-    "V_0": np.log([(7.86e-3)**2, (7.86e-3)**2])
-})
-"""
-def runif_design(box, n_draws):
-    """Draws parameters from a given box."""
-    draw_frame = pd.DataFrame()
-    for param in box.columns:
-        draw_frame[param] = np.random.uniform(box[param][0], box[param][1], n_draws)
-    
-    draw_frame["mu"] = np.log(draw_frame["mu"])
-    draw_frame["kappa"] = np.log(draw_frame["kappa"])
-    draw_frame["theta"] = np.log(draw_frame["theta"])
-    draw_frame["xi"] = np.log(draw_frame["xi"])
-    draw_frame["rho"] = funky_transform(draw_frame["rho"])
-    draw_frame["V_0"] = np.log(draw_frame["V_0"])
+# Make a copy and apply transformation to perturbation scale
+initial_params_df = initial_params_df_nat.copy()
+initial_params_df["mu"] = np.log(initial_params_df["mu"])
+initial_params_df["kappa"] = np.log(initial_params_df["kappa"])
+initial_params_df["theta"] = np.log(initial_params_df["theta"])
+initial_params_df["xi"] = np.log(initial_params_df["xi"])
+initial_params_df["rho"] = funky_transform(initial_params_df["rho"])
+initial_params_df["V_0"] = np.log(initial_params_df["V_0"])
 
-    return draw_frame
-
-initial_params_df = runif_design(sp500_box, NREPS_FITR)
 
 # Fit POMP model using IF
 start_time = datetime.datetime.now()
@@ -183,7 +148,8 @@ for rep in range(NREPS_FITR):
         theta = theta_check,
         # Covariates(time)
         covars = jnp.insert(sp500['y'].values, 0, 0)
-    )      
+    )
+    key, subkey = random.split(key)      
     fit_out.append(pypomp.fit.fit(
         pomp_object = sp500_model,
         J = NP_FITR,
@@ -192,7 +158,8 @@ for rep in range(NREPS_FITR):
         sigmas = RW_SD,
         sigmas_init = RW_SD_INIT,
         mode = "IF2",
-        thresh_mif = 0
+        thresh_mif = 0,
+        key = subkey
     ))
 
     model_for_pfilter = pypomp.pomp_class.Pomp(
@@ -222,6 +189,6 @@ results_out = {
     "pf_out": pf_out,
 }
 end_time = datetime.datetime.now()
-print(end_time - start_time) # run time
-print(pf_out) # Print LL estimates
+print("Run time:", end_time - start_time)
+print("Particle filter output:", pf_out) # Print LL estimates
 pickle.dump(results_out, open(SAVE_RESULTS_TO, "wb"))
